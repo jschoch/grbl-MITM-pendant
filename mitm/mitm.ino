@@ -59,6 +59,66 @@ void setup() {
   Serial2.begin(rate1);
   // mySerial.println("Hello, world?");
 }
+
+//  STM32 encoder stuff
+
+int PPR = 1;
+
+HardwareTimer timer_1(1);
+
+long timer_1_ints = 1L;
+
+
+void func_timer_1(){
+   if(timer_1.getDirection()){
+      timer_1_ints--;    
+  }else{
+      timer_1_ints++;
+  }    
+}
+
+// uses internal timer 2 on PA0 and PA1
+HardwareTimer timer_2(2);
+
+long timer_2_ints = 1L;
+
+
+void func_timer_2(){
+   if(timer_2.getDirection()){
+      timer_2_ints--;    
+  }else{
+      timer_2_ints++;
+  }    
+}
+
+
+// uses internal timer 4 on PB6 and PB7
+// somewhat confusing to call this timer3 when it is internal timer 4....
+HardwareTimer timer_3(4);
+
+long timer_3_ints = 1L;
+
+
+void func_timer_3(){
+   if(timer_3.getDirection()){
+      timer_3_ints--;    
+  }else{
+      timer_3_ints++;
+  }    
+}
+
+void config_timer(HardwareTimer this_timer, void (*func)()){
+  this_timer.setMode(0, TIMER_ENCODER); //set mode, the channel is not used when in this mode. 
+  this_timer.pause(); //stop... 
+  this_timer.setPrescaleFactor(1); //normal for encoder to have the lowest or no prescaler. 
+  this_timer.setOverflow(PPR);    //use this to match the number of pulse per revolution of the encoder. Most industrial use 1024 single channel steps. 
+  this_timer.setCount(0);          //reset the counter. 
+  this_timer.setEdgeCounting(TIMER_SMCR_SMS_ENCODER3); //or TIMER_SMCR_SMS_ENCODER1 or TIMER_SMCR_SMS_ENCODER2. This uses both channels to count and ascertain direction. 
+  this_timer.attachInterrupt(0, func); //channel doesn't mean much here either.  
+  this_timer.resume();
+}
+
+
 void PinA() {
   /*
   cli(); //stop interrupts happening before we read pin values
