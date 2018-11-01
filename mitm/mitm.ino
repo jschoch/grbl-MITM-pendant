@@ -148,6 +148,28 @@ void PinB() {
   */
 }
 
+void runG(String s){
+  Serial2.print("G91 G0  X-5");
+  Serial.print("P >>> G91 G0  X-5");
+  
+}
+
+void runG(){
+  Serial.println("");
+  Serial2.println("");
+}
+
+void jogAxis(thing axis){
+  runG("$J=G91");
+  runG(axis);
+  runG();
+  // TODO:  should I look for a response?
+}
+
+void cutAxis(thing axis){
+  //  how should this work, should it get the speed or use the current set speed?
+}
+
 void loop() { // run over and over
   if (Serial2.available()) {
     //Serial.println(Serial2.read(), BIN);
