@@ -13,13 +13,16 @@ A basic arduino sketch that allows you to use a rotary encoder and other Arduino
 # TODO list
 
 - [ ] Add reset command to ensure we can deal with alarm conditions
+- [ ] figure out what dedicated buttons are wanted
 - [ ] Process job start job end and implement lockout
 - [ ] Configuration for Jog speed
-- [ ] add OLED screen support for stuff like DRO readings
+- [ ] add OLED screen support for stuff like DRO readings, maybe need one screen on the pendant and one on the mill
 - [ ] rapid mode with hold down key
 - [ ] DRO and go mode, enter distance pulled from grbl config and execute at speed when go key hit
 - [ ] virtual stops, jog to and set or set from current position.  kinda like per job softlmits
 - [ ] store config and variables for different encoder hardware, detents, etc
+- [ ] raize Z, for bit change raise just to the verge of the Z stop.
+
 
 probe modes
 
