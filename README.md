@@ -10,6 +10,11 @@ A basic arduino sketch that allows you to use a rotary encoder and other Arduino
   
   DO NOT USE WHEN PC IS SENDING GCODE FILES AND COMMANDS TO THE GRBL ARDUINO.</i>
 
+## Status
+
+working single encoder and serial from and to grbl!
+
+
 # TODO list
 
 - [ ] Add reset command to ensure we can deal with alarm conditions
