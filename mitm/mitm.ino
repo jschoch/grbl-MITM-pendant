@@ -7,6 +7,7 @@
 
 #include "HardwareTimer.h"
 #include "mitm.h"
+#include <cstring>
 
 //
 // PA8/PA9 timer_1
@@ -19,6 +20,13 @@ unsigned long rate1 = 115200;
 unsigned long rate2 = 115200;
 
 String prefixor = "P <<<";
+
+bool idle = true;
+bool waiting = false;
+
+int feedXY = 500;
+int rapidXY = 1000;
+float stepSize = 0.1;
 
 //  STM32 encoder stuff
 
@@ -92,11 +100,23 @@ void config_timer(HardwareTimer this_timer, void (*func)()){
 
 /*
 
+Jog Modes
+
 mode 1 is jog queue mode.  In this mode the encoders will be set to a value and await a "go" button press.
 mode 2 is realtime jog mode.  this mode will jog and wait for "ok" status from the planner. subsequent encoder turns will queue the next jog.  A stop of encoder movement inside some debounce window will issue a jog stop.
+
+setup/probe modes
+
 mode 3 is setup modes.  this mode is used to set virtual stops
+
+Cutting modes
+
+
 mode 4 is facing mode.  encoder turns will start a "pass", "stepover" or "plunge/ramp"
 mode 5 will be slotting mode
+mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
+  likely do first move is yo yo move, 2nd is stepover.
+  could add diameter of tool and auto calculate stepover based on sfm or something.
 
 */
 
@@ -143,22 +163,28 @@ void setup() {
   config_timer(timer_2,func_timer_2);
   config_timer(timer_3,func_timer_3);
   Serial.println("Timer configured");
+  Serial.println("Running setup");
   Serial2.println("$$");
+
+  // TODO: here is set MM mode, how to deal with these preferences?
+  Serial2.println("G21");
 }
 
 
-void runG(String start, int axis, long distance){
+void runG(String start, int axis, int steps){
+  // TODO: should i check the state first?
+
   Serial2.print(start);
   Serial.print(prefixor);
   Serial.print(start);
-  runG(axis);
-  runG(distance);
+  runG(axis,steps);
+  //String feed = " F" + feedXY;
+  //runG(feed);
+  runG(" F1000 ");
+  runG();
 }
 
 void runG(String s){
-  /*Serial2.print("G91 G0  X-5");
-  Serial.print("P >>> G91 G0  X-5");
-  */
 
   Serial2.print(s);
   Serial.print(s);
@@ -166,19 +192,22 @@ void runG(String s){
 }
 
 
-void runG(int axis){
+void runG(int axis, int steps){
+  float d = steps * stepSize;
+  String distance = String(d);
   switch (axis){
     case AA:
-      runG(" A ");
+      runG(" A "+ distance);
       break;
     case AX:
-      runG(" X ");
+      // TODO shoudl use axis specific steps
+      runG(" X "+ distance);
       break;
     case AY:
-      runG(" Y ");
+      runG(" Y "+ distance);
       break;
     case AZ: 
-      runG(" Z ");
+      runG(" Z "+ distance);
     default: 
       break;
   }
@@ -195,17 +224,18 @@ void runG(){
   Serial2.println("");
 }
 
-
-void jogAxis(int axis, long distance){
-  runG("$J=G91");
-  runG(axis);
-  runG(distance);
-  // TODO: add feed rate var
-  runG("F1000");
-  
-  runG();
-  // TODO:  should I look for a response?
+// TODO: distance should be float modified by step size
+// shoudl be able to queue some number of moves based on formula described on grbl jog docs
+// in other modes incremental distance works
+void jogAxis(int axis, int steps){
+  if (!waiting){
+    waiting = true;
+    runG("$J=G91",axis,steps);
+  }else{
+    Serial.print("w");
+  }
 }
+
 
 void cutAxis(int axis){
   //  how should this work, should it get the speed or use the current set speed?
@@ -252,17 +282,81 @@ void setMode(){
   // Set current mode
 }
 
+String getLine(){
+  String inData;
+  bool foundeol = false;
+  while (!foundeol){
+        while(Serial2.available() > 0){
+          char recieved = Serial2.read();
+          inData += recieved; 
+  
+          // Process message when new line character is recieved
+          if (recieved == '\n')
+          {
+              //inData += '\n';
+              foundeol = true;
+              break;
+          }
+        } // available while
+    }
+  Serial.print("  \t...:");
+  Serial.print(inData);
+  return inData;
+}
+
+bool isError(String cmd){
+  return false;
+}
+
+void checkOk(String cmd){
+  //if(std::strcmp(cmd,"ok\n") == 0){
+
+  // fuck there are way too many ways to do simple shit in c++
+  //if (cmd == 'ok\n'){
+
+  // this startsWith seems shitty
+  if (cmd.startsWith( "ok")){
+      //std::cout << "string was 'ok'";
+      Serial.write("OK!");
+      waiting = false;
+  }else{
+    //std::cout << "string was not 'ok'";   
+    Serial.write("HORROR!");
+  }
+}
+
+void parseCmd(String cmd){
+  if (isError(cmd)){
+    
+  }
+  checkOk(cmd);
+}
+
 long cntr = 0L;
+
+
 
 void loop() { // run over and over
   if (Serial2.available()) {
     //Serial.println(Serial2.read(), BIN);
-    Serial.write(Serial2.read());
+    String cmd = getLine();
+    if(waiting){
+      parseCmd(cmd);
+      // do something with cmd here
+    }
+    Serial.print(cmd);
   }
   if (Serial.available()) {
     Serial2.write(Serial.read());
   }
   
+  if (idle){
+    // working
+    check_x();
+  }
+}
+
+
   /*
   if(cntr > 200000){
     cntr = 0;
@@ -279,7 +373,3 @@ void loop() { // run over and over
     cntr++;
   }
   */
-
-
-  check_x();
-}
