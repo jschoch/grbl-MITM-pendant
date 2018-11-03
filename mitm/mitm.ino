@@ -26,7 +26,7 @@ bool waiting = false;
 
 int feedXY = 500;
 int rapidXY = 1000;
-float stepSize = 0.1;
+float stepSize = 0.01;
 
 //  STM32 encoder stuff
 
@@ -253,7 +253,8 @@ void check_x(){
     Serial.print(" YI: ");
     Serial.println(timer_3_ints);
     old_timer_3_ints = timer_3_ints;
-    jogAxis(AY,timer_3_ints);
+    //jogAxis(AY,timer_3_ints);
+    jogAxis(AY,2);
     old_timer_3_ints = timer_3_ints;
   }
 }
