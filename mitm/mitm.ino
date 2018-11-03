@@ -36,22 +36,24 @@ HardwareTimer timer_1(1);
 
 long timer_1_ints = 1L;
 
-Axis Xaxis;
+Axis Xaxis("X",X);
 //Axis Xaxis(&timer_1_ints, "X", X);
 
 
 void func_timer_1(){
    if(timer_1.getDirection()){
-      timer_1_ints--;    
+      Xaxis.pos--;
+      //timer_1_ints--;    
   }else{
-      timer_1_ints++;
+      //timer_1_ints++;
+      Xaxis.pos++;
   }    
 }
 
 // uses internal timer 2 on PA0 and PA1
 HardwareTimer timer_2(2);
 
-Axis Zaxis;
+Axis Zaxis("Z",Z);
 
 long timer_2_ints = 1L;
 long old_timer_2_ints = 1L;
@@ -59,9 +61,9 @@ long old_timer_2_ints = 1L;
 
 void func_timer_2(){
    if(timer_2.getDirection()){
-      timer_2_ints--;    
+      Zaxis.pos--;
   }else{
-      timer_2_ints++;
+      Zaxis.pos++;
   }    
 }
 
@@ -78,16 +80,18 @@ HardwareTimer timer_3(3);
 long timer_3_ints = 1L;
 
 
-Axis Yaxis;
+Axis Yaxis("Y",Y);
 //Axis Yaxis(&timer_3_ints, "Y", Y);
 
 long old_timer_3_ints = 1L;
 
 void func_timer_3(){
    if(timer_3.getDirection()){
-      timer_3_ints--;    
+      //timer_3_ints--;    
+      Yaxis.pos++;
   }else{
-      timer_3_ints++;
+      //timer_3_ints++;
+      Yaxis.pos--;
   }    
 }
 
@@ -173,10 +177,14 @@ void setup() {
   config_timer(timer_3,func_timer_3);
 
   // setup axis objects
+  /*
   Yaxis.old_pos = 1L;
   Yaxis.axis_name = "Y";
   Yaxis.id = Y;
   Yaxis.pos = &timer_3_ints;
+  */
+
+
   /*
   Xaxis.begin(&timer_1_ints, "X", X);
   Yaxis.begin(&timer_3_ints, "Y", Y);

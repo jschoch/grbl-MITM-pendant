@@ -6,3 +6,6 @@
 - [ ] mock up some hardware
 - [ ] do some testing of echo and job start job end
 
+
+...  Have ISR call Axis object directly, move axis objects to global space.
+

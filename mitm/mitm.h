@@ -1,41 +1,50 @@
 enum axis {
-  X,
-  Y,
-  Z,
-  F
+  X,Y,Z,F
 };
 
 const char* ax_names = "XYZF";
 
-class Axis{
-
-  public:
-    void begin(long *pos, const char* axis_name, int id);
-    long *pos;
-    long old_pos;
+class Axis {
+    
     int id;
-    const char* axis_name = "UNDEF";
-    bool moved();
-    long getPos(){
-      return *pos;
-    };
-    void resetPos(){
-      old_pos = *pos;
+    
+  public:
+    const char *axis_name;
+    long old_pos;
+    long pos;
+
+    Axis(const char *axis_name="UNDEF", int id=-1) 
+        : axis_name(axis_name), id(id), pos(0), old_pos(1)
+    {
+        // constructor takes care of initialization
     }
+
+    void begin() {
+        old_pos=pos=0;
+    }
+
+    bool moved() {
+        return (pos == old_pos);
+    }
+
+    long getPos(){
+      return pos;
+    }
+
+    void setPos(long nextpos) {
+        pos = nextpos;
+    }
+
+    void decrPos() {
+        pos--;
+    }
+
+    void incrPos() {
+        pos++;
+    }
+
+    void resetPos(){
+      old_pos = pos;
+    }
+
 };
-
-void Axis::begin(long *inpos, const char* inname, int inid){  
-  *pos = *inpos;
-  axis_name = inname;
-  id = inid;
-  old_pos = 1L;  
-}
-
-bool Axis::moved(){
-  if(*pos == old_pos){
-    return false;
-  }else{
-    return true;
-  }
-  
-}
