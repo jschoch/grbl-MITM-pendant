@@ -36,6 +36,9 @@ HardwareTimer timer_1(1);
 
 long timer_1_ints = 1L;
 
+Axis Xaxis;
+//Axis Xaxis(&timer_1_ints, "X", X);
+
 
 void func_timer_1(){
    if(timer_1.getDirection()){
@@ -47,6 +50,8 @@ void func_timer_1(){
 
 // uses internal timer 2 on PA0 and PA1
 HardwareTimer timer_2(2);
+
+Axis Zaxis;
 
 long timer_2_ints = 1L;
 long old_timer_2_ints = 1L;
@@ -71,6 +76,10 @@ void func_timer_2(){
 HardwareTimer timer_3(3);
 
 long timer_3_ints = 1L;
+
+
+Axis Yaxis;
+//Axis Yaxis(&timer_3_ints, "Y", Y);
 
 long old_timer_3_ints = 1L;
 
@@ -162,6 +171,18 @@ void setup() {
 
   config_timer(timer_2,func_timer_2);
   config_timer(timer_3,func_timer_3);
+
+  // setup axis objects
+  Yaxis.old_pos = 1L;
+  Yaxis.axis_name = "Y";
+  Yaxis.id = Y;
+  Yaxis.pos = &timer_3_ints;
+  /*
+  Xaxis.begin(&timer_1_ints, "X", X);
+  Yaxis.begin(&timer_3_ints, "Y", Y);
+  Zaxis.begin(&timer_2_ints, "Z",Z);
+  */
+  
   Serial.println("Timer configured");
   Serial.println("Running setup");
   Serial2.println("$$");
@@ -193,20 +214,21 @@ void runG(String s){
 
 
 void runG(int axis, int steps){
+  // TODO: get rid of this, make .step method in Axis
   float d = steps * stepSize;
   String distance = String(d);
   switch (axis){
-    case AA:
-      runG(" A "+ distance);
+    case F:
+      runG(" F "+ distance);
       break;
-    case AX:
+    case X:
       // TODO shoudl use axis specific steps
       runG(" X "+ distance);
       break;
-    case AY:
+    case Y:
       runG(" Y "+ distance);
       break;
-    case AZ: 
+    case Z: 
       runG(" Z "+ distance);
     default: 
       break;
@@ -241,23 +263,30 @@ void cutAxis(int axis){
   //  how should this work, should it get the speed or use the current set speed?
 }
 
-void check_x(){
-  if (old_timer_2_ints != timer_2_ints){
-    Serial.print("XI: ");
-    Serial.println(timer_2_ints);
-    old_timer_2_ints = timer_2_ints;
+
+
+void check_input(){
+
+  check_axis(Yaxis);
   }
 
-  if (old_timer_3_ints != timer_3_ints){
-    Serial.print(timer_3.getCount());
-    Serial.print(" YI: ");
-    Serial.println(timer_3_ints);
-    old_timer_3_ints = timer_3_ints;
-    //jogAxis(AY,timer_3_ints);
-    jogAxis(AY,2);
-    old_timer_3_ints = timer_3_ints;
+void check_axis(Axis axis){
+  if(axis.moved()){
+    Serial.print("debug: axis: ");
+    Serial.print(axis.axis_name);
+    Serial.print(" ");
+    Serial.print(axis.getPos());
+    Serial.print( ": " );
+    Serial.print( axis.old_pos );
+    Serial.println( " moved");
+    // TODO:  get direction and issue jogAxis
+
+    axis.resetPos();
   }
+  //jogAxis(axis, 1);
 }
+
+
 
 void check_pos(){
   // issue ? command and parse reult
@@ -312,7 +341,7 @@ bool isError(String cmd){
 void checkOk(String cmd){
   //if(std::strcmp(cmd,"ok\n") == 0){
 
-  // fuck there are way too many ways to do simple shit in c++
+  // fuck! there are way too many ways to do simple shit in c++
   //if (cmd == 'ok\n'){
 
   // this startsWith seems shitty
@@ -353,7 +382,7 @@ void loop() { // run over and over
   
   if (idle){
     // working
-    check_x();
+    check_input();
   }
 }
 

@@ -1,5 +1,6 @@
 - [ x ] wire up encoders and change PPR.
 
+- [ ] move config_timer into axis objects
 - [ ] add OLED support
 
 - [ ] mock up some hardware
