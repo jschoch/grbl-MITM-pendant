@@ -35,13 +35,15 @@ int PPR = 2;
 
 HardwareTimer timer_1(1);
 
-Axis Xaxis("X",X, 0L, 0L);
+Axis Xaxis("X",timer_1);
 
 
 void func_timer_1(){
    if(timer_1.getDirection()){
+      Xaxis.forward = true;
       Xaxis.decrPos();
   }else{
+      Xaxis.forward = false;
       Xaxis.incrPos();
   }    
 }
@@ -49,12 +51,14 @@ void func_timer_1(){
 // uses internal timer 2 on PA0 and PA1
 HardwareTimer timer_2(2);
 
-Axis Zaxis("Z",Z,0L,0L);
+Axis Zaxis("Z",timer_2);
 
 void func_timer_2(){
    if(timer_2.getDirection()){
+      Zaxis.forward = true;
       Zaxis.decrPos();
   }else{
+      Xaxis.forward = false;
       Zaxis.incrPos();
   }    
 }
@@ -71,7 +75,7 @@ HardwareTimer timer_3(3);
 volatile long ypos = 0;
 volatile long yold_pos = 2;
 //Axis Yaxis("Y",Y,ypos, yold_pos);
-Axis Yaxis;
+Axis Yaxis("Y", timer_3);
 
 void func_timer_3(){
    if(timer_3.getDirection()){
@@ -166,9 +170,9 @@ void setup() {
 
   // setup axis objects
 
-  Yaxis.begin("Y");
-  //Zaxis.begin();
-  //Xaxis.begin();
+  Yaxis.begin("Y", 1000, 0.01f);
+  Zaxis.begin("Z", 1000, 0.01f);
+  Xaxis.begin("X", 1000, 0.01f);
 
 
  
@@ -183,7 +187,7 @@ void setup() {
 
 void runG(String start, Axis axis, int steps){
 
-  // TODO: should i check the state first?
+  // TODO: should i check the state first before I try to move?  Grbl does this already
 
   Serial2.print(start);
   Serial.print(prefixor);
@@ -328,6 +332,7 @@ void handleError(String cmd){
   // TODO:  how do you ensure you are not parsing error codes from a job?
 
   Serial.println("Error: " + cmd);
+
   /*  this doesn't work switch doesn't like String, you need to parse out the int in the error number
   switch (cmd){
     case "error:8":
