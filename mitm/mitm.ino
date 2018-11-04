@@ -7,7 +7,8 @@
 
 #include "HardwareTimer.h"
 #include "mitm.h"
-#include <cstring>
+//#include <cstring>
+#include <string>
 
 //
 // PA8/PA9 timer_1
@@ -34,64 +35,51 @@ int PPR = 2;
 
 HardwareTimer timer_1(1);
 
-long timer_1_ints = 1L;
-
-Axis Xaxis("X",X);
-//Axis Xaxis(&timer_1_ints, "X", X);
+Axis Xaxis("X",X, 0L, 0L);
 
 
 void func_timer_1(){
    if(timer_1.getDirection()){
-      Xaxis.pos--;
-      //timer_1_ints--;    
+      Xaxis.decrPos();
   }else{
-      //timer_1_ints++;
-      Xaxis.pos++;
+      Xaxis.incrPos();
   }    
 }
 
 // uses internal timer 2 on PA0 and PA1
 HardwareTimer timer_2(2);
 
-Axis Zaxis("Z",Z);
-
-long timer_2_ints = 1L;
-long old_timer_2_ints = 1L;
-
+Axis Zaxis("Z",Z,0L,0L);
 
 void func_timer_2(){
    if(timer_2.getDirection()){
-      Zaxis.pos--;
+      Zaxis.decrPos();
   }else{
-      Zaxis.pos++;
+      Zaxis.incrPos();
   }    
 }
 
 
 // uses internal timer 4 on PB6 and PB7
-
 //  not used
 
 
 // use internal timer 3 on PA 6/7
-// somewhat confusing to call this timer3 when it is internal timer 4....
+
 HardwareTimer timer_3(3);
 
-long timer_3_ints = 1L;
-
-
-Axis Yaxis("Y",Y);
-//Axis Yaxis(&timer_3_ints, "Y", Y);
-
-long old_timer_3_ints = 1L;
+volatile long ypos = 0;
+volatile long yold_pos = 2;
+//Axis Yaxis("Y",Y,ypos, yold_pos);
+Axis Yaxis;
 
 void func_timer_3(){
    if(timer_3.getDirection()){
-      //timer_3_ints--;    
-      Yaxis.pos++;
+      Yaxis.forward = true;
+      Yaxis.decrPos();
   }else{
-      //timer_3_ints++;
-      Yaxis.pos--;
+      Yaxis.forward = false;
+      Yaxis.incrPos();
   }    
 }
 
@@ -177,20 +165,13 @@ void setup() {
   config_timer(timer_3,func_timer_3);
 
   // setup axis objects
-  /*
-  Yaxis.old_pos = 1L;
-  Yaxis.axis_name = "Y";
-  Yaxis.id = Y;
-  Yaxis.pos = &timer_3_ints;
-  */
+
+  Yaxis.begin("Y");
+  //Zaxis.begin();
+  //Xaxis.begin();
 
 
-  /*
-  Xaxis.begin(&timer_1_ints, "X", X);
-  Yaxis.begin(&timer_3_ints, "Y", Y);
-  Zaxis.begin(&timer_2_ints, "Z",Z);
-  */
-  
+ 
   Serial.println("Timer configured");
   Serial.println("Running setup");
   Serial2.println("$$");
@@ -200,16 +181,15 @@ void setup() {
 }
 
 
-void runG(String start, int axis, int steps){
+void runG(String start, Axis axis, int steps){
+
   // TODO: should i check the state first?
 
   Serial2.print(start);
   Serial.print(prefixor);
   Serial.print(start);
   runG(axis,steps);
-  //String feed = " F" + feedXY;
-  //runG(feed);
-  runG(" F1000 ");
+  // finish 
   runG();
 }
 
@@ -220,27 +200,30 @@ void runG(String s){
   
 }
 
+void runG(std::string s){
 
-void runG(int axis, int steps){
-  // TODO: get rid of this, make .step method in Axis
+  Serial2.print(s.c_str());
+  Serial.print(s.c_str());
+}
+
+
+void runG(Axis axis, int steps){
   float d = steps * stepSize;
-  String distance = String(d);
-  switch (axis){
-    case F:
-      runG(" F "+ distance);
-      break;
-    case X:
-      // TODO shoudl use axis specific steps
-      runG(" X "+ distance);
-      break;
-    case Y:
-      runG(" Y "+ distance);
-      break;
-    case Z: 
-      runG(" Z "+ distance);
-    default: 
-      break;
+  //String distance = String(d);
+  std::string gcode(axis.axis_name);
+   
+  // negative distance for reverse
+  if(!axis.forward){
+    gcode.append("-");
   }
+  char buffer[13];
+  gcode.append(dtostrf(d,6, 6, buffer));
+
+  // TODO: add axis specific feeds
+  gcode.append(" F1000");
+
+  
+  runG(gcode);
 
 }
 
@@ -257,12 +240,15 @@ void runG(){
 // TODO: distance should be float modified by step size
 // shoudl be able to queue some number of moves based on formula described on grbl jog docs
 // in other modes incremental distance works
-void jogAxis(int axis, int steps){
+
+void jogAxis(Axis axis, int steps){
   if (!waiting){
     waiting = true;
-    runG("$J=G91",axis,steps);
+    runG("$J=G91 ",axis,steps);
   }else{
-    Serial.print("w");
+  
+    // maybe blink here or something.  print "w" seems to mess up line parsing.
+    //Serial.print("w");
   }
 }
 
@@ -272,26 +258,17 @@ void cutAxis(int axis){
 }
 
 
-
 void check_input(){
-
   check_axis(Yaxis);
+  check_axis(Xaxis);
+  check_axis(Zaxis);
   }
 
-void check_axis(Axis axis){
+void check_axis(Axis &axis){
   if(axis.moved()){
-    Serial.print("debug: axis: ");
-    Serial.print(axis.axis_name);
-    Serial.print(" ");
-    Serial.print(axis.getPos());
-    Serial.print( ": " );
-    Serial.print( axis.old_pos );
-    Serial.println( " moved");
-    // TODO:  get direction and issue jogAxis
-
-    axis.resetPos();
+    jogAxis(axis, 1);
+    bool ya = axis.resetPos();
   }
-  //jogAxis(axis, 1);
 }
 
 
@@ -346,27 +323,50 @@ bool isError(String cmd){
   return false;
 }
 
+void handleError(String cmd){
+
+  // TODO:  how do you ensure you are not parsing error codes from a job?
+
+  Serial.println("Error: " + cmd);
+  /*  this doesn't work switch doesn't like String, you need to parse out the int in the error number
+  switch (cmd){
+    case "error:8":
+      Serial.prinln("machine in alarm, cannot jog!  Press Alarm reset if safe");
+      break;
+
+    case "error:2":
+      Serial.println("no feed set.  Set a feedrate!");
+
+    case "error:15":
+      Serial.println("Jog would exceed machine boundary.  Update soft limits or don't jog beyond the machine");
+
+    default: 
+      Serial.println(" unknown msg!");
+      Serial.print(cmd);
+      Serial.println("DISASTER!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+
+  }
+  */
+}
+
 void checkOk(String cmd){
   //if(std::strcmp(cmd,"ok\n") == 0){
 
-  // fuck! there are way too many ways to do simple shit in c++
-  //if (cmd == 'ok\n'){
 
   // this startsWith seems shitty
   if (cmd.startsWith( "ok")){
-      //std::cout << "string was 'ok'";
-      Serial.write("OK!");
+      Serial.println("OK!");
       waiting = false;
-  }else{
-    //std::cout << "string was not 'ok'";   
-    Serial.write("HORROR!");
+  }
+  else if(cmd.startsWith("error:")){
+    handleError(cmd);
+  }
+  else{
+    Serial.println("HORROR!");
   }
 }
 
 void parseCmd(String cmd){
-  if (isError(cmd)){
-    
-  }
   checkOk(cmd);
 }
 
@@ -389,25 +389,8 @@ void loop() { // run over and over
   }
   
   if (idle){
-    // working
     check_input();
   }
 }
 
 
-  /*
-  if(cntr > 200000){
-    cntr = 0;
-    int a = digitalRead(PA6);
-    int b = digitalRead(PA7);
-    Serial.print("T3: ");
-    Serial.print(timer_3_ints);
-    Serial.print(" A: ");
-    Serial.print(a);
-    Serial.print(" B: ");
-    Serial.println(b);
-
-  }else{
-    cntr++;
-  }
-  */
