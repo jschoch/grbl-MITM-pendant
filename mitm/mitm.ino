@@ -10,6 +10,16 @@
 //#include <cstring>
 #include <string>
 
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SSD1306_128_64
+
+#define OLED_RESET 4
+Adafruit_SSD1306 display(OLED_RESET);
+
 //
 // PA8/PA9 timer_1
 // PA0/PA1 timer_2
@@ -153,6 +163,16 @@ void setup() {
   }
   delay(500);
   digitalWrite(PC13,HIGH);
+
+  // Display stuff
+
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3c); 
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0,0);
+  display.println("Hello, world!");
+  display.display();
 
   Serial.println("Serial connected... connecting to grbl...");
   // set the data rate for the SoftwareSerial port

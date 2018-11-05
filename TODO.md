@@ -1,9 +1,9 @@
 - [ x ] wire up encoders and change PPR.
 
-- [ ] move config_timer into axis objects
 - [ ] add OLED support
-
-- [ ] mock up some hardware
+- [ ] mock up hardware
+- [ ] move config_timer into axis objects
+-
 - [ ] do some testing of echo and job start job end
 
 
