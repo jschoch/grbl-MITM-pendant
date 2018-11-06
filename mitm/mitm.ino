@@ -7,6 +7,7 @@
 
 #include "HardwareTimer.h"
 #include "mitm.h"
+#include "pos.h"
 //#include <cstring>
 #include <string>
 
@@ -14,6 +15,12 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <neotimer.h>
+
+std::string d_cmd = ".";
+std::string d_status = "BOOT";
+
+Neotimer mytimer = Neotimer(100);
 
 #define SSD1306_128_64
 
@@ -174,7 +181,7 @@ void setup() {
   display.println("Hello, world!");
   display.display();
 
-  Serial.println("Serial connected... connecting to grbl...");
+  display.println("Serial connected... connecting to grbl...");
   // set the data rate for the SoftwareSerial port
 
   // Using serial pins PA2/PA3
@@ -183,7 +190,7 @@ void setup() {
     digitalWrite(PC13,LOW);
   }
   digitalWrite(PC13,HIGH);
-  Serial.println("Ready to configure timer");
+  display.println("Ready to configure timer");
 
   config_timer(timer_2,func_timer_2);
   config_timer(timer_3,func_timer_3);
@@ -196,12 +203,13 @@ void setup() {
 
 
  
-  Serial.println("Timer configured");
-  Serial.println("Running setup");
+  display.println("Timer configured");
+  display.println("Running setup");
   Serial2.println("$$");
 
   // TODO: here is set MM mode, how to deal with these preferences?
   Serial2.println("G21");
+  d_status = "DONGS";
 }
 
 
@@ -269,10 +277,11 @@ void jogAxis(Axis axis, int steps){
   if (!waiting){
     waiting = true;
     runG("$J=G91 ",axis,steps);
+    d_cmd = "W";
   }else{
   
     // maybe blink here or something.  print "w" seems to mess up line parsing.
-    //Serial.print("w");
+    d_cmd = "W";
   }
 }
 
@@ -374,16 +383,43 @@ void handleError(String cmd){
   */
 }
 
+
+void drawCMD(std::string c){
+  display.setTextColor(WHITE, BLACK);
+  display.setCursor(120,5);
+  display.print(c.c_str());
+  display.setCursor(0,0);
+}
+
+void drawStatus(std::string c){
+  display.setTextColor(WHITE, BLACK);
+  display.setCursor(90,45);
+  display.print(c.c_str());
+  display.setCursor(0,0);
+}
+
+void drawPOS(float x, float y, float z){
+  display.setTextColor(WHITE, BLACK);
+  display.setCursor(0,5);
+  display.print("X: 1.001\nY: 2.001\nZ: 0.001");
+  display.setCursor(0,0);
+}
+
 void checkOk(String cmd){
   //if(std::strcmp(cmd,"ok\n") == 0){
 
 
   // this startsWith seems shitty
   if (cmd.startsWith( "ok")){
-      Serial.println("OK!");
+      //Serial.println("OK!");
+      d_cmd = "OK";
       waiting = false;
   }
+  else if(cmd.startsWith("<Jog")){
+    d_status ="JOG";
+  }
   else if(cmd.startsWith("error:")){
+    d_cmd = "ER";
     handleError(cmd);
   }
   else{
@@ -416,6 +452,14 @@ void loop() { // run over and over
   if (idle){
     check_input();
   }
-}
 
+  if(mytimer.repeat()){
+    display.clearDisplay();
+    //display.print(".");
+    drawCMD(d_cmd);
+    drawStatus(d_status);
+    drawPOS(0.0,0.0,0.0);
+    display.display();
+  }
+}
 
