@@ -7,7 +7,6 @@
 
 #include "HardwareTimer.h"
 #include "mitm.h"
-#include "pos.h"
 //#include <cstring>
 #include <string>
 
@@ -16,11 +15,23 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <neotimer.h>
+#include "gstate.h"
+#include "pos.h"
+#include "mem.c"
 
+/*
 std::string d_cmd = ".";
 std::string d_status = "BOOT";
+*/
+
+Gstate _gs;
+
+
+PosSet oldPos = {Pos(),Pos(),false};
 
 Neotimer mytimer = Neotimer(100);
+
+Neotimer lasttimer = Neotimer(500);
 
 #define SSD1306_128_64
 
@@ -178,7 +189,7 @@ void setup() {
   display.setTextSize(1);
   display.setTextColor(WHITE);
   display.setCursor(0,0);
-  display.println("Hello, world!");
+  display.println("Setup: ");
   display.display();
 
   display.println("Serial connected... connecting to grbl...");
@@ -194,6 +205,7 @@ void setup() {
 
   config_timer(timer_2,func_timer_2);
   config_timer(timer_3,func_timer_3);
+  display.display();
 
   // setup axis objects
 
@@ -209,11 +221,11 @@ void setup() {
 
   // TODO: here is set MM mode, how to deal with these preferences?
   Serial2.println("G21");
-  d_status = "DONGS";
+  display.display();
 }
 
 
-void runG(String start, Axis axis, int steps){
+void runG(const char* start, Axis axis, int steps){
 
   // TODO: should i check the state first before I try to move?  Grbl does this already
 
@@ -225,12 +237,14 @@ void runG(String start, Axis axis, int steps){
   runG();
 }
 
-void runG(String s){
+/*
+void runG(String &s){
 
   Serial2.print(s);
   Serial.print(s);
   
 }
+*/
 
 void runG(std::string s){
 
@@ -260,7 +274,8 @@ void runG(Axis axis, int steps){
 }
 
 void runG(long distance){
-  runG(String(distance));
+  Serial2.print(distance);
+  Serial.print(distance);
 }
 
 void runG(){
@@ -277,11 +292,11 @@ void jogAxis(Axis axis, int steps){
   if (!waiting){
     waiting = true;
     runG("$J=G91 ",axis,steps);
-    d_cmd = "W";
+    _gs.d_cmd = "W";
   }else{
   
     // maybe blink here or something.  print "w" seems to mess up line parsing.
-    d_cmd = "W";
+    _gs.d_cmd = "W";
   }
 }
 
@@ -347,16 +362,16 @@ String getLine(){
           }
         } // available while
     }
-  Serial.print("  \t...:");
-  Serial.print(inData);
+  //Serial.print("  \t...:");
+  //Serial.print(inData);
   return inData;
 }
 
-bool isError(String cmd){
+bool isError(String &cmd){
   return false;
 }
 
-void handleError(String cmd){
+void handleError(String &cmd){
 
   // TODO:  how do you ensure you are not parsing error codes from a job?
 
@@ -386,7 +401,7 @@ void handleError(String cmd){
 
 void drawCMD(std::string c){
   display.setTextColor(WHITE, BLACK);
-  display.setCursor(120,5);
+  display.setCursor(110,5);
   display.print(c.c_str());
   display.setCursor(0,0);
 }
@@ -401,34 +416,71 @@ void drawStatus(std::string c){
 void drawPOS(float x, float y, float z){
   display.setTextColor(WHITE, BLACK);
   display.setCursor(0,5);
-  display.print("X: 1.001\nY: 2.001\nZ: 0.001");
+  //std::string pos = "X: " + oldPos.mpos.x + "\n";
+  //display.print("X: " + oldPos.mpos.x + "\nY: 2.001\nZ: 0.001");
+  //display.print(
+  display.print("X: ");
+  display.println(oldPos.mpos.x);
+  display.print("Y: ");
+  display.println(oldPos.mpos.y);
+  display.print("Z: ");
+  display.println(oldPos.mpos.z);
   display.setCursor(0,0);
 }
 
-void checkOk(String cmd){
+void checkOk(String &cmd){
   //if(std::strcmp(cmd,"ok\n") == 0){
 
 
   // this startsWith seems shitty
   if (cmd.startsWith( "ok")){
       //Serial.println("OK!");
-      d_cmd = "OK";
+      _gs.d_cmd = "OK";
+      Serial2.write("?");
       waiting = false;
   }
   else if(cmd.startsWith("<Jog")){
-    d_status ="JOG";
+    _gs.d_status ="JOG";
+  }
+  else if(cmd.startsWith("<Idle")){
+    _gs.d_status = "IDLE";
+    std::vector<char*> statusBlock = split(cmd, "|",8);
+    oldPos = parseStatus(statusBlock);
   }
   else if(cmd.startsWith("error:")){
-    d_cmd = "ER";
+    _gs.d_cmd = "ER";
     handleError(cmd);
   }
   else{
     Serial.println("HORROR!");
+    Serial.println(cmd);
+    Serial.println("end");
   }
 }
 
-void parseCmd(String cmd){
-  checkOk(cmd);
+void parseCmd(String &cmd){
+  if (cmd.startsWith( "ok")){
+      // How do I tell which command this was for?
+      //Serial.println("OK!");
+      _gs.d_cmd = "OK";
+  }
+  else if(cmd.startsWith("<Jog")){
+    _gs.d_status ="JOG";
+  }
+  else if(cmd.startsWith("<Idle")){
+    _gs.d_status = "IDLE";
+    std::vector<char*> statusBlock = split(cmd, "|",8);
+    oldPos = parseStatus(statusBlock);
+  }
+  else if(cmd.startsWith("error:")){
+    _gs.d_cmd = "ER";
+    handleError(cmd);
+  }
+  else{
+    Serial.println("doh!");
+    Serial.println(cmd);
+    Serial.println("end");
+  }
 }
 
 long cntr = 0L;
@@ -440,8 +492,10 @@ void loop() { // run over and over
     //Serial.println(Serial2.read(), BIN);
     String cmd = getLine();
     if(waiting){
-      parseCmd(cmd);
+      checkOk(cmd);
       // do something with cmd here
+    }else{
+      parseCmd(cmd);
     }
     Serial.print(cmd);
   }
@@ -456,10 +510,16 @@ void loop() { // run over and over
   if(mytimer.repeat()){
     display.clearDisplay();
     //display.print(".");
-    drawCMD(d_cmd);
-    drawStatus(d_status);
+    drawCMD(_gs.d_cmd);
+    drawStatus(_gs.d_status);
     drawPOS(0.0,0.0,0.0);
     display.display();
+  }
+
+  // brute force updater
+  if(lasttimer.repeat()){
+    Serial2.println("?");
+    digitalWrite(PC13, (!digitalRead(PC13)));
   }
 }
 
