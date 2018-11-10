@@ -81,8 +81,6 @@ void updatePos(char* cmd, PosSet &posSet){
   }
   if (y != 0){
     posSet.mpos.y = y;
-  }else{
-    Serial.println("Pos DOH");
   }
   if (z != 0){
     posSet.mpos.z = z;

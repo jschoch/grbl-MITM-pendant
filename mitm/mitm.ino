@@ -400,8 +400,8 @@ void handleError(){
 
   // TODO:  how do you ensure you are not parsing error codes from a job?
 
-  Serial.print("Error: ");
-  Serial.println(cmd);
+  //Serial.print("Error: ");
+  //Serial.println(cmd);
 
   /*  this doesn't work switch doesn't like String, you need to parse out the int in the error number
   switch (cmd){
@@ -486,8 +486,8 @@ void checkOk(){
 }
 
 void parseCmd(){
+  updatePos(cmd, oldPos);
 
-  //if (!strcmp(cmd,"ok")){
   if(strcasestr(cmd, "ok") != NULL){
       // How do I tell which command this was for?
       //Serial.println("OK!");
@@ -496,20 +496,18 @@ void parseCmd(){
         waiting = false;
       }
   }
-  //else if(!strcmp(tst,"<Jo")){
   else if(strcasestr(cmd, "<Jog") != NULL){
     _gs.d_status ="JOG";
   }
-  //else if(!strcmp(tst,"<Id")){
   else if(strcasestr(cmd, "<Idle") != NULL){
     _gs.d_status = "IDLE";
-    updatePos(cmd, oldPos);
-    //statusBlock = split(cmd, "|",8);
-    //oldPos = parseStatus(statusBlock);
   }
-  //else if(!strcmp(tst,"err")){
-  else if(strcasestr(cmd, "error:") != NULL){
+  else if(strcasestr(cmd, "<error:") != NULL){
     _gs.d_cmd = "ER";
+    handleError();
+  }
+  else if(strcasestr(cmd, "<Alarm") != NULL){
+    _gs.d_cmd = "Alarm";
     handleError();
   }
   else{
@@ -537,6 +535,7 @@ void loop() { // run over and over
       // reset new command flat
       newCMD = false;
       Serial.print(cmd);
+      Serial.print("\n");
     }
   }
   if (Serial.available()) {
@@ -560,9 +559,12 @@ void loop() { // run over and over
 
   // brute force updater
   if(lasttimer.repeat()){
-    Serial2.println("?");
+    // TODO:  should only ask for status if the sender isn't polling
+
+    //Serial2.println("?");
+    //Serial.println("?");
     digitalWrite(PC13, (!digitalRead(PC13)));
-    display_mallinfo();
+    //display_mallinfo();
   }
 }
 
