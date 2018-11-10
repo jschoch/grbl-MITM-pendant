@@ -1,7 +1,30 @@
 /*
 *****grbl "Man in the Middle" Jog Controller Pendant*****
 
+WARNING:  I suck at c and c++.  It is a miracle this even works.  Use at your own risk!
+
   Port to stm32f103 by Jesse Schoch
+
+// Modes notes
+
+
+Jog Modes
+
+mode 1 is jog queue mode.  In this mode the encoders will be set to a value and await a "go" button press.
+mode 2 is realtime jog mode.  this mode will jog and wait for "ok" status from the planner. subsequent encoder turns will queue the next jog.  A stop of encoder movement inside some debounce window will issue a jog stop.
+
+setup/probe modes
+
+mode 3 is setup modes.  this mode is used to set virtual stops
+
+Cutting modes
+
+
+mode 4 is facing mode.  encoder turns will start a "pass", "stepover" or "plunge/ramp"
+mode 5 will be slotting mode
+mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
+  likely do first move is yo yo move, 2nd is stepover.
+  could add diameter of tool and auto calculate stepover based on sfm or something.
 
 */
 
@@ -32,7 +55,6 @@ char rc;
 // _gs holds x,y,z coordinates
 
 Gstate _gs;
-
 
 // holds last position, not used to compare right now
 
@@ -110,9 +132,6 @@ void func_timer_2(){
 }
 
 
-// uses internal timer 4 on PB6 and PB7
-//  not used
-
 
 // use internal timer 3 on PA 6/7
 
@@ -132,6 +151,10 @@ void func_timer_3(){
   }    
 }
 
+// uses internal timer 4 on PB6 and PB7
+//  not used
+
+
 void config_timer(HardwareTimer this_timer, void (*func)()){
   this_timer.pause(); //stop... 
 
@@ -146,104 +169,9 @@ void config_timer(HardwareTimer this_timer, void (*func)()){
 }
 
 
-// Modes notes
-
-/*
-
-Jog Modes
-
-mode 1 is jog queue mode.  In this mode the encoders will be set to a value and await a "go" button press.
-mode 2 is realtime jog mode.  this mode will jog and wait for "ok" status from the planner. subsequent encoder turns will queue the next jog.  A stop of encoder movement inside some debounce window will issue a jog stop.
-
-setup/probe modes
-
-mode 3 is setup modes.  this mode is used to set virtual stops
-
-Cutting modes
-
-
-mode 4 is facing mode.  encoder turns will start a "pass", "stepover" or "plunge/ramp"
-mode 5 will be slotting mode
-mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
-  likely do first move is yo yo move, 2nd is stepover.
-  could add diameter of tool and auto calculate stepover based on sfm or something.
-
-*/
-
-
-void setup() {
-  
-  pinMode(PC13,OUTPUT);
-  pinMode(PA0, INPUT_PULLUP);
-  pinMode(PA1, INPUT_PULLUP);
-  pinMode(PA6, INPUT_PULLUP);
-  pinMode(PA7, INPUT_PULLUP);
-
-
-
-  Serial.begin(rate1);
-
-  /*
-  // Open serial communications and wait for port to open:
-  while (!Serial) {
-    
-    ; // wait for serial port to connect. Needed for native USB port only
-    digitalWrite(PC13,LOW);
-  }
-  delay(500);
-  digitalWrite(PC13,HIGH);
-  */
-
-  // Display stuff
-
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3c); 
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(WHITE);
-  display.setCursor(0,0);
-  display.println("Setup: ");
-  display.display();
-
-  display.println("Serial connected... connecting to grbl...");
-  // set the data rate for the SoftwareSerial port
-
-  // Using serial pins PA2/PA3
-  Serial2.begin(rate1);
-
-  /* TODO: do I need these while !Serial?
-  while( !Serial2){
-    digitalWrite(PC13,LOW);
-  }
-  digitalWrite(PC13,HIGH);
-  */
-
-  display.println("Ready to configure timer");
-
-  config_timer(timer_1,func_timer_1);
-  config_timer(timer_2,func_timer_2);
-  config_timer(timer_3,func_timer_3);
-  display.display();
-
-  // setup axis objects
-
-  Yaxis.begin("Y", 1000, 0.01f);
-  Zaxis.begin("Z", 1000, 0.01f);
-  Xaxis.begin("X", 1000, 0.01f);
-
-
- 
-  display.println("Timer configured");
-  display.println("Running setup");
-
-  // TODO: get config when we can parse it
-  //Serial2.println("$$");
-
-  // TODO: here is set MM mode, how to deal with these preferences?
-  Serial2.println("G21");
-  display.display();
-}
-
-
+// send a command to grbl.  
+// TODO ensure the steps are calculated per axis
+// TODO ensure the feed speed are calculated per axis
 void runG(const char* start, Axis axis, int steps){
 
   // TODO: should i check the state first before I try to move?  Grbl does this already
@@ -256,35 +184,15 @@ void runG(const char* start, Axis axis, int steps){
   runG();
 }
 
-
+/* defunct
 void runG(std::string &s){
   Serial2.print(s.c_str());
   Serial.print(s.c_str());
 }
-
-
-
-/*
-void runG(Axis axis, int steps){
-  float d = steps * stepSize;
-  std::string gcode(axis.axis_name);
-   
-  // negative distance for reverse
-  if(!axis.forward){
-    gcode.append("-");
-  }
-  char buffer[13];
-  gcode.append(dtostrf(d,6, 6, buffer));
-
-  // TODO: add axis specific feeds
-  gcode.append(" F1000");
-
-  
-  runG(gcode);
-
-}
 */
 
+
+// sends the axis and feed parts of the jog
 void runG(Axis axis, int steps){
   Serial.print(axis.axis_name);
   Serial2.print(axis.axis_name);
@@ -306,6 +214,8 @@ void runG(long distance){
   Serial.print(distance);
 }
 
+
+// this just sends the end of line
 void runG(){
   // TODO:  should i just have runGln which prints eol
   Serial.println("");
@@ -399,6 +309,7 @@ bool isError(String &cmd){
 void handleError(){
 
   // TODO:  how do you ensure you are not parsing error codes from a job?
+  // TODO: redo the switch as something else
 
   //Serial.print("Error: ");
   //Serial.println(cmd);
@@ -452,38 +363,11 @@ void drawPOS(float x, float y, float z){
 }
 
 
-
+/*
 void checkOk(){
-  /*  having this twice is stupid
-  if (!strcmp(oktst, "ok")){
-      _gs.d_cmd = "OK";
-      Serial2.write("?");
-      Serial.write("?");
-      waiting = false;
-  }
-  
-  else if(!strcmp(tst,"<Jo")){
-    _gs.d_status ="JOG";
-  }
- 
-  else if(!strcmp(tst,"<Id")){
-    _gs.d_status = "IDLE";
-
-    // MEMTEST TODO
-    //statusBlock = split(cmd, "|",8);
-    //oldPos = parseStatus(statusBlock);
-  }
-  else if(!strcmp(tst,"err")){
-    _gs.d_cmd = "ER";
-    handleError();
-  }
-  else{
-    Serial.println("HORROR!");
-    Serial.print(cmd);
-    Serial.println("hend");
-  }
-  */
+  //having this twice is stupid
 }
+*/
 
 void parseCmd(){
   updatePos(cmd, oldPos);
@@ -510,12 +394,75 @@ void parseCmd(){
     _gs.d_cmd = "Alarm";
     handleError();
   }
+  else if(strcasestr(cmd, "<Run") != NULL){
+    _gs.d_cmd = "RUN";
+    // lock out input.  need a better way!
+    // I can also adjust speed/feeds when in this mode.  button, toggle?
+    waiting = true;
+    handleError();
+  }
   else{
     Serial.println("doh!");
     Serial.print(cmd);
     Serial.println("end");
   }
 }
+
+void setup() {
+  
+  pinMode(PC13,OUTPUT);
+  pinMode(PA0, INPUT_PULLUP);
+  pinMode(PA1, INPUT_PULLUP);
+  pinMode(PA6, INPUT_PULLUP);
+  pinMode(PA7, INPUT_PULLUP);
+
+
+
+  Serial.begin(rate1);
+
+
+  // Display stuff
+
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3c); 
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0,0);
+  display.println("Setup: ");
+  display.display();
+
+  display.println("Serial connected... connecting to grbl...");
+  // set the data rate for the SoftwareSerial port
+
+  // Using serial pins PA2/PA3
+  Serial2.begin(rate1);
+
+  display.println("Ready to configure timer");
+
+  config_timer(timer_1,func_timer_1);
+  config_timer(timer_2,func_timer_2);
+  config_timer(timer_3,func_timer_3);
+  display.display();
+
+  // setup axis objects
+
+  Yaxis.begin("Y", 1000, 0.01f);
+  Zaxis.begin("Z", 1000, 0.01f);
+  Xaxis.begin("X", 1000, 0.01f);
+
+
+ 
+  display.println("Timer configured");
+  display.println("Running setup");
+
+  // TODO: get config when we can parse it
+  //Serial2.println("$$");
+
+  // TODO: here is set MM mode, how to deal with these preferences?
+  Serial2.println("G21");
+  display.display();
+}
+
 
 void loop() { // run over and over
   if (Serial2.available()) {
