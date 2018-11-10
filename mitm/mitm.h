@@ -56,9 +56,8 @@ class Axis {
       pos = 0L;
     }
 
-    bool resetPos(){
+    void resetPos(){
       old_pos = pos;
-      return (old_pos == pos);
     }
 
 };

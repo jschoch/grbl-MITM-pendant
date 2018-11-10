@@ -2,15 +2,13 @@
 #include <vector>
 #include "gstate.h"
 
-
-std::vector<char*> split(String s, char const *sep,int max){
+/*  this is not memory friendly
+std::vector<char*> split(char* s, char const *sep,int max){
     char *end, *r, *tok;
     
     
-    //char *strings[max];
     std::vector<char*> strings;
-    r = end = strdup(s.c_str());
-    //assert(end != NULL);
+    r = end = strdup(s);
     int cnt = 0;
     while ((tok = strsep(&end, sep)) != NULL) {
         //printf("%s <-- \n", tok);
@@ -24,6 +22,7 @@ std::vector<char*> split(String s, char const *sep,int max){
     //strings[cnt++] = "";
     return strings;
 }
+*/
 
 class Pos {
     public: 
@@ -35,21 +34,27 @@ class Pos {
     Pos() : x(0.0), y(0.0), z(0.0) {}
 };
 
-Pos parsePos(char* s){
-    std::vector<char*> coords = split(s, ",",8);
+
+/* not mem friendly
+static std::vector<char*> coords;
+
+void parsePos(char* s, Pos &pos){
+    coords = split(s, ",",8);
     
     if(coords.size() == 3){
         // terrible
-        Pos pos = Pos((float)atof(coords[0]),(float)atof(coords[1]),(float)atof(coords[2]));
-        return pos;
+        //pos = Pos((float)atof(coords[0]),(float)atof(coords[1]),(float)atof(coords[2]));
+        pos.x = (float)atof(coords[0]);
+        pos.y = (float)atof(coords[1]);
+        pos.z = (float)atof(coords[2]);
     }else{
         //std::cout << "HORROR\n"; 
-        _gs.d_status = "HORROR";
-        Pos pos = Pos(0.0f,0.0f,0.0f);
-        return pos;
+        _gs.d_status = "POS HORROR";
+        //pos = Pos(0.0f,0.0f,0.0f);
     }
     
 }
+*/
 
 typedef struct {
     Pos mpos;
@@ -57,29 +62,54 @@ typedef struct {
     bool changed;
     } PosSet;
     
-PosSet parseStatus(std::vector<char*> statusBlock){
-    PosSet p = {Pos(), Pos(), false};
+PosSet pp = {Pos(), Pos(), false};
+Pos wpos;
+Pos mpos;
+
+static std::vector<char*> status;
+
+void updatePos(char* cmd, PosSet &posSet){
+  float x,y,z;
+
+  // TODO: why can't i have it modify directly?
+  //static int r = sscanf(cmd,"<Idle|MPos:%f,%f,%f",&x,posSet.mpos.y,&z);
+  int r = sscanf(cmd,"<Idle|MPos:%f,%f,%f",&x,&y,&z);
+  
+  // TODO: what if these are actually 0.0?
+  if (x != 0){
+    posSet.mpos.x = x;
+  }
+  if (y != 0){
+    posSet.mpos.y = y;
+  }else{
+    Serial.println("Pos DOH");
+  }
+  if (z != 0){
+    posSet.mpos.z = z;
+  }
+}
+
+/* not mem friendly
+PosSet parseStatus(std::vector<char*> &statusBlock){
     
     for (unsigned int i = 1; i < statusBlock.size();i++){
-        std::vector<char*> status = split(statusBlock[i],":",8);
+        status = split(statusBlock[i],":",8);
         if(status[1] != NULL && ((strcmp(status[0], "MPos") == 0) )){
             //std::cout << "Pos found:" << status[0] << ":" << status[1] << " \n";
-            Pos pos = parsePos(status[1]);
+            parsePos(status[1],mpos);
             //std::cout << "mpos parsed: " << pos.x << "\n";
-            p.mpos = pos;
-            p.changed = true;
+            pp.mpos = mpos;
+            pp.changed = true;
         }
          if(status[1] != NULL && (strcmp(status[0], "WCO") == 0)){
             //std::cout << "Pos found:" << status[0] << ":" << status[1] << " \n";
-            Pos pos = parsePos(status[1]);
+            parsePos(status[1],wpos);
             //std::cout << "wco parsed: " << pos.x << "\n";
-            p.wco = pos;
-            p.changed = true;
+            pp.wco = wpos;
+            pp.changed = true;
         }
         
-        for (unsigned int y = 0; y < status.size(); y++){
-            std::vector<char*> bar = split(status[y],",",8);
-        }
     }
-    return p;
+    return pp;
 }
+*/

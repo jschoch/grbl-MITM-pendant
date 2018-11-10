@@ -7,7 +7,6 @@
 
 #include "HardwareTimer.h"
 #include "mitm.h"
-//#include <cstring>
 #include <string>
 
 #include <SPI.h>
@@ -17,38 +16,50 @@
 #include <neotimer.h>
 #include "gstate.h"
 #include "pos.h"
-#include "mem.c"
 
-/*
-std::string d_cmd = ".";
-std::string d_status = "BOOT";
-*/
+
+
+// globals for parsing Serial2 (grbl) command responses
+const byte numChars = 255;
+char cmd[numChars];   // an array to store the received data
+
+
+boolean newCMD = false;
+static byte ndx = 0;
+char endMarker = '\n';
+char rc;
+
+// _gs holds x,y,z coordinates
 
 Gstate _gs;
 
 
+// holds last position, not used to compare right now
+
 PosSet oldPos = {Pos(),Pos(),false};
+
+// timer for updating screen
 
 Neotimer mytimer = Neotimer(100);
 
-Neotimer lasttimer = Neotimer(500);
+// timer for getting status
 
+Neotimer lasttimer = Neotimer(1500);
+
+
+// display stuff
 #define SSD1306_128_64
-
 #define OLED_RESET 4
 Adafruit_SSD1306 display(OLED_RESET);
 
-//
-// PA8/PA9 timer_1
-// PA0/PA1 timer_2
-// PB6/PB7 timer_3
-//
+// Serial rates
 
-//double rate1 = 115200;
+
 unsigned long rate1 = 115200;
 unsigned long rate2 = 115200;
 
-String prefixor = "P <<<";
+// TODO:  consider extended ascii, will it be ignored by the sender?
+const char* prefixor = "P <<<";
 
 bool idle = true;
 bool waiting = false;
@@ -58,6 +69,13 @@ int rapidXY = 1000;
 float stepSize = 0.01;
 
 //  STM32 encoder stuff
+
+//
+// PA8/PA9 timer_1
+// PA0/PA1 timer_2
+// PB6/PB7 timer_3
+//
+
 
 int PPR = 2;
 
@@ -102,7 +120,6 @@ HardwareTimer timer_3(3);
 
 volatile long ypos = 0;
 volatile long yold_pos = 2;
-//Axis Yaxis("Y",Y,ypos, yold_pos);
 Axis Yaxis("Y", timer_3);
 
 void func_timer_3(){
@@ -129,7 +146,7 @@ void config_timer(HardwareTimer this_timer, void (*func)()){
 }
 
 
-// Modes
+// Modes notes
 
 /*
 
@@ -156,12 +173,6 @@ mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
 
 void setup() {
   
-  //configure timers 
-  
-  //config_timer(timer_1,func_timer_1);
-  //config_timer(timer_2,func_timer_2);
-  //config_timer(timer_3,func_timer_3);
-
   pinMode(PC13,OUTPUT);
   pinMode(PA0, INPUT_PULLUP);
   pinMode(PA1, INPUT_PULLUP);
@@ -169,10 +180,10 @@ void setup() {
   pinMode(PA7, INPUT_PULLUP);
 
 
-  //config_timer(timer_2,func_timer_2);
 
   Serial.begin(rate1);
 
+  /*
   // Open serial communications and wait for port to open:
   while (!Serial) {
     
@@ -181,6 +192,7 @@ void setup() {
   }
   delay(500);
   digitalWrite(PC13,HIGH);
+  */
 
   // Display stuff
 
@@ -197,12 +209,17 @@ void setup() {
 
   // Using serial pins PA2/PA3
   Serial2.begin(rate1);
+
+  /* TODO: do I need these while !Serial?
   while( !Serial2){
     digitalWrite(PC13,LOW);
   }
   digitalWrite(PC13,HIGH);
+  */
+
   display.println("Ready to configure timer");
 
+  config_timer(timer_1,func_timer_1);
   config_timer(timer_2,func_timer_2);
   config_timer(timer_3,func_timer_3);
   display.display();
@@ -217,7 +234,9 @@ void setup() {
  
   display.println("Timer configured");
   display.println("Running setup");
-  Serial2.println("$$");
+
+  // TODO: get config when we can parse it
+  //Serial2.println("$$");
 
   // TODO: here is set MM mode, how to deal with these preferences?
   Serial2.println("G21");
@@ -237,25 +256,17 @@ void runG(const char* start, Axis axis, int steps){
   runG();
 }
 
-/*
-void runG(String &s){
 
-  Serial2.print(s);
-  Serial.print(s);
-  
-}
-*/
-
-void runG(std::string s){
-
+void runG(std::string &s){
   Serial2.print(s.c_str());
   Serial.print(s.c_str());
 }
 
 
+
+/*
 void runG(Axis axis, int steps){
   float d = steps * stepSize;
-  //String distance = String(d);
   std::string gcode(axis.axis_name);
    
   // negative distance for reverse
@@ -271,6 +282,23 @@ void runG(Axis axis, int steps){
   
   runG(gcode);
 
+}
+*/
+
+void runG(Axis axis, int steps){
+  Serial.print(axis.axis_name);
+  Serial2.print(axis.axis_name);
+
+  if(!axis.forward){
+    Serial.print("-");
+    Serial2.print("-");
+  }
+
+  Serial.print((steps * stepSize));
+  Serial2.print((steps * stepSize));
+  
+  Serial.println(" F1000");
+  Serial2.println(" F1000");
 }
 
 void runG(long distance){
@@ -294,8 +322,6 @@ void jogAxis(Axis axis, int steps){
     runG("$J=G91 ",axis,steps);
     _gs.d_cmd = "W";
   }else{
-  
-    // maybe blink here or something.  print "w" seems to mess up line parsing.
     _gs.d_cmd = "W";
   }
 }
@@ -315,7 +341,7 @@ void check_input(){
 void check_axis(Axis &axis){
   if(axis.moved()){
     jogAxis(axis, 1);
-    bool ya = axis.resetPos();
+    axis.resetPos();
   }
 }
 
@@ -345,37 +371,37 @@ void setMode(){
   // Set current mode
 }
 
-String getLine(){
-  String inData;
-  bool foundeol = false;
-  while (!foundeol){
-        while(Serial2.available() > 0){
-          char recieved = Serial2.read();
-          inData += recieved; 
+void getLine() {
+    while (Serial2.available() > 0 && newCMD == false) {
+        rc = Serial2.read();
+
+        if (rc != endMarker) {
+            cmd[ndx] = rc;
+            ndx++;
+            if (ndx >= numChars) {
+                ndx = numChars - 1;
+            }
+        }
+        else {
+            cmd[ndx] = '\0'; // terminate the string
+            ndx = 0;
   
-          // Process message when new line character is recieved
-          if (recieved == '\n')
-          {
-              //inData += '\n';
-              foundeol = true;
-              break;
-          }
-        } // available while
+            newCMD = true;
+        }
     }
-  //Serial.print("  \t...:");
-  //Serial.print(inData);
-  return inData;
 }
+
 
 bool isError(String &cmd){
   return false;
 }
 
-void handleError(String &cmd){
+void handleError(){
 
   // TODO:  how do you ensure you are not parsing error codes from a job?
 
-  Serial.println("Error: " + cmd);
+  Serial.print("Error: ");
+  Serial.println(cmd);
 
   /*  this doesn't work switch doesn't like String, you need to parse out the int in the error number
   switch (cmd){
@@ -399,14 +425,14 @@ void handleError(String &cmd){
 }
 
 
-void drawCMD(std::string c){
+void drawCMD(std::string &c){
   display.setTextColor(WHITE, BLACK);
   display.setCursor(110,5);
   display.print(c.c_str());
   display.setCursor(0,0);
 }
 
-void drawStatus(std::string c){
+void drawStatus(std::string &c){
   display.setTextColor(WHITE, BLACK);
   display.setCursor(90,45);
   display.print(c.c_str());
@@ -416,9 +442,6 @@ void drawStatus(std::string c){
 void drawPOS(float x, float y, float z){
   display.setTextColor(WHITE, BLACK);
   display.setCursor(0,5);
-  //std::string pos = "X: " + oldPos.mpos.x + "\n";
-  //display.print("X: " + oldPos.mpos.x + "\nY: 2.001\nZ: 0.001");
-  //display.print(
   display.print("X: ");
   display.println(oldPos.mpos.x);
   display.print("Y: ");
@@ -428,81 +451,100 @@ void drawPOS(float x, float y, float z){
   display.setCursor(0,0);
 }
 
-void checkOk(String &cmd){
-  //if(std::strcmp(cmd,"ok\n") == 0){
 
 
-  // this startsWith seems shitty
-  if (cmd.startsWith( "ok")){
-      //Serial.println("OK!");
+void checkOk(){
+  /*  having this twice is stupid
+  if (!strcmp(oktst, "ok")){
       _gs.d_cmd = "OK";
       Serial2.write("?");
+      Serial.write("?");
       waiting = false;
   }
-  else if(cmd.startsWith("<Jog")){
+  
+  else if(!strcmp(tst,"<Jo")){
     _gs.d_status ="JOG";
   }
-  else if(cmd.startsWith("<Idle")){
+ 
+  else if(!strcmp(tst,"<Id")){
     _gs.d_status = "IDLE";
-    std::vector<char*> statusBlock = split(cmd, "|",8);
-    oldPos = parseStatus(statusBlock);
+
+    // MEMTEST TODO
+    //statusBlock = split(cmd, "|",8);
+    //oldPos = parseStatus(statusBlock);
   }
-  else if(cmd.startsWith("error:")){
+  else if(!strcmp(tst,"err")){
     _gs.d_cmd = "ER";
-    handleError(cmd);
+    handleError();
   }
   else{
     Serial.println("HORROR!");
-    Serial.println(cmd);
-    Serial.println("end");
+    Serial.print(cmd);
+    Serial.println("hend");
   }
+  */
 }
 
-void parseCmd(String &cmd){
-  if (cmd.startsWith( "ok")){
+void parseCmd(){
+
+  //if (!strcmp(cmd,"ok")){
+  if(strcasestr(cmd, "ok") != NULL){
       // How do I tell which command this was for?
       //Serial.println("OK!");
       _gs.d_cmd = "OK";
+      if(waiting){
+        waiting = false;
+      }
   }
-  else if(cmd.startsWith("<Jog")){
+  //else if(!strcmp(tst,"<Jo")){
+  else if(strcasestr(cmd, "<Jog") != NULL){
     _gs.d_status ="JOG";
   }
-  else if(cmd.startsWith("<Idle")){
+  //else if(!strcmp(tst,"<Id")){
+  else if(strcasestr(cmd, "<Idle") != NULL){
     _gs.d_status = "IDLE";
-    std::vector<char*> statusBlock = split(cmd, "|",8);
-    oldPos = parseStatus(statusBlock);
+    updatePos(cmd, oldPos);
+    //statusBlock = split(cmd, "|",8);
+    //oldPos = parseStatus(statusBlock);
   }
-  else if(cmd.startsWith("error:")){
+  //else if(!strcmp(tst,"err")){
+  else if(strcasestr(cmd, "error:") != NULL){
     _gs.d_cmd = "ER";
-    handleError(cmd);
+    handleError();
   }
   else{
     Serial.println("doh!");
-    Serial.println(cmd);
+    Serial.print(cmd);
     Serial.println("end");
   }
 }
 
-long cntr = 0L;
-
-
-
 void loop() { // run over and over
   if (Serial2.available()) {
-    //Serial.println(Serial2.read(), BIN);
-    String cmd = getLine();
-    if(waiting){
-      checkOk(cmd);
-      // do something with cmd here
-    }else{
-      parseCmd(cmd);
+    // check for a command
+    getLine();
+
+    // if a new command is found do somethign with it
+    if(newCMD){
+      //if(waiting){
+        // TODO: no way to tell if the ok clears "waiting" or some other command!??  figure out how to do this or just parsse it once.
+        //checkOk();
+        // do something with cmd here
+      //}else{
+        parseCmd();
+      //}
+
+      // reset new command flat
+      newCMD = false;
+      Serial.print(cmd);
     }
-    Serial.print(cmd);
   }
   if (Serial.available()) {
     Serial2.write(Serial.read());
   }
   
+
+  // check encoders
   if (idle){
     check_input();
   }
@@ -520,6 +562,7 @@ void loop() { // run over and over
   if(lasttimer.repeat()){
     Serial2.println("?");
     digitalWrite(PC13, (!digitalRead(PC13)));
+    display_mallinfo();
   }
 }
 
