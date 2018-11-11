@@ -52,6 +52,10 @@ static byte ndx = 0;
 char endMarker = '\n';
 char rc;
 
+// update timer thing
+
+unsigned long lastUpdate = 0;
+
 // _gs holds x,y,z coordinates
 
 Gstate _gs;
@@ -370,7 +374,10 @@ void checkOk(){
 */
 
 void parseCmd(){
+
+  // TODO:  should only really parst non-"ok" commands right?
   updatePos(cmd, oldPos);
+  //lastUpdate = millis();
 
   if(strcasestr(cmd, "ok") != NULL){
       // How do I tell which command this was for?
@@ -415,6 +422,15 @@ void setup() {
   pinMode(PA1, INPUT_PULLUP);
   pinMode(PA6, INPUT_PULLUP);
   pinMode(PA7, INPUT_PULLUP);
+  //pinMode(PB6, INPUT_PULLUP);
+  //pinMode(PB7, INPUT_PULLUP);
+  pinMode(PA8, INPUT_PULLUP);
+  pinMode(PA9, INPUT_PULLUP);
+
+
+  // i2c
+  //pinMode(PB6, INPUT_PULLUP);
+  //pinMode(PB7, INPUT_PULLUP);
 
 
 
@@ -507,7 +523,10 @@ void loop() { // run over and over
   // brute force updater
   if(lasttimer.repeat()){
     // TODO:  should only ask for status if the sender isn't polling
-
+    if((millis() - lastUpdate) > 1000){
+      Serial2.println("?");
+      lastUpdate = millis();
+    }
     //Serial2.println("?");
     //Serial.println("?");
     digitalWrite(PC13, (!digitalRead(PC13)));

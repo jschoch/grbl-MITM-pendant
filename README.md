@@ -12,7 +12,11 @@ A basic arduino sketch that allows you to use a rotary encoder and other Arduino
 
 ## Status
 
-working single encoder and serial from and to grbl!
+working with 3 encoders and oled!
+
+## Senders
+
+For UGS it appears you need to find you ~/.ugs directory and make a copy of grbl.json and replace "GRBL" in the file with "XLCD".  This prevents error popups which hopelessly lock up UGS
 
 
 # TODO list

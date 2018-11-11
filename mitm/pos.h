@@ -2,6 +2,8 @@
 #include <vector>
 #include "gstate.h"
 
+extern unsigned long lastUpdate;
+
 class Pos {
     public: 
     float x;
@@ -41,6 +43,7 @@ void updatePos(char* cmd, PosSet &posSet){
   
   // TODO: what if these are actually 0.0?
   if(r == 6){
+    lastUpdate = millis();
     posSet.mpos.x = px;
     posSet.mpos.y = py;
     posSet.mpos.z = pz;
