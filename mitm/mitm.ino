@@ -54,17 +54,27 @@ uint8_t btn1 = PB5;
 uint8_t btn2 = PB4;
 uint8_t btn3 = PB3;
 uint8_t btn4 = PA15;
+uint8_t btn5 = PB12;
 
-const int NUM_BUTTONS = 4;
-const uint8_t BUTTON_PINS[NUM_BUTTONS] = {btn1,btn2,btn3,btn4};
+uint8_t CMD_B = 0;
+const uint8_t CMD_MAX = 12;
+
+const int NUM_BUTTONS = 5;
+const uint8_t BUTTON_PINS[NUM_BUTTONS] = {btn1,btn2,btn3,btn4,btn5};
 Bounce * buttons = new Bounce[NUM_BUTTONS];
 
 std::string current_mode = "Startup";
 bool pass = true;
 uint8_t stepCnt = 1;
 
+bool serial_dbg = true;
+
+// inc_mode moves one stepSize.  inc_mode false activates acceleration mode.
+// acceleration mode attempts to queue moves and to stop motion when the velocity of the wheel is zero.
+bool inc_mode = true;
+
 // seems to cause usb connection to reset!
-uint8_t btn5 = PA12;
+//uint8_t btn5 = PA12;
 
 
 // globals for parsing Serial2 (grbl) command responses
@@ -216,49 +226,58 @@ void runG(const char* start, Axis axis, int steps){
   Serial2.print(start);
 
   // no way to print this to UGS
-  //Serial.print(prefixor);
-  //Serial.print(start);
+  if (serial_dbg){
+    Serial.print(prefixor);
+    Serial.print(start);
+  }
   runG(axis,steps);
   // finish 
   runG();
 }
 
-/* defunct
-void runG(std::string &s){
-  Serial2.print(s.c_str());
-  Serial.print(s.c_str());
-}
-*/
+
 
 
 // sends the axis and feed parts of the jog
 void runG(Axis axis, int steps){
+
   
   // no way to print this to UGS
-  //Serial.print(axis.axis_name);
-  
+  if (serial_dbg){
+    Serial.print(axis.axis_name);
+  }
   
   Serial2.print(axis.axis_name);
 
   if(!axis.forward){
+    if (serial_dbg){
     // no way to print this to UGS
-    //Serial.print("-");
+      Serial.print("-");
+    }
     Serial2.print("-");
   }
 
   // no way to print this to UGS
-  //Serial.print((steps * stepSize));
+  if (serial_dbg){
+    Serial.print((steps * stepSize));
+  }
   Serial2.print((steps * stepSize));
   
   // no way to print this to UGS
-  //Serial.println(" F1000");
+  if (serial_dbg){
+    Serial.println(" F1000");
+  }
   Serial2.println(" F1000");
+  CMD_B++;
 }
 
 void runG(long distance){
   Serial2.print(distance);
   // no way to print this to UGS
-  //Serial.print(distance);
+  if (serial_dbg){
+    Serial.print(distance);
+    
+  }
 }
 
 
@@ -267,7 +286,9 @@ void runG(){
   // TODO:  should i just have runGln which prints eol
 
   // no way to print this to UGS
-  //Serial.println("");
+  if (serial_dbg){
+    Serial.println("");
+  }
   Serial2.println("");
 }
 
@@ -275,14 +296,22 @@ void runG(){
 // shoudl be able to queue some number of moves based on formula described on grbl jog docs
 // in other modes incremental distance works
 
-void jogAxis(Axis axis, int steps){
+void incJogAxis(Axis axis, int steps){
   if (!waiting){
     waiting = true;
     runG("$J=G91 ",axis,steps);
     _gs.d_cmd = "R";
   }else{
     _gs.d_cmd = "W";
+    _gs.d_status = "Waiting";
   }
+}
+
+void velJogAxis(Axis axis, int steps){
+  runG("$J=G91 ",axis,steps);
+  _gs.d_cmd = "A";
+  _gs.d_status = "VelJog";
+  
 }
 
 
@@ -303,13 +332,21 @@ void check_mode(){
   if(buttons[1].rose()){
     stepCnt++;
   }
+  
+
   if(buttons[2].rose()){
+      inc_mode = !inc_mode;
+  }
+  if(buttons[3].rose()){
      //  send unlock
      Serial2.println("$X");
   }
-  if(buttons[3].rose()){
+  
+  if(buttons[4].rose()){
      //  TODO:  add stop jog command here
-     Serial2.println(CMD_JOG_CANCEL);
+     Serial2.flush();
+     Serial2.write(CMD_JOG_CANCEL);
+     Serial2.flush();
   }
 
   // TODO: decide if you need 2 buttons for step size
@@ -359,10 +396,17 @@ void check_input(){
   check_mode();
 
   // TODO:   should display some warning that you are trying to jog in pass mode or if you are trying to run a job in jog mode.
-  if(!pass){
+  if(!pass && (CMD_B <= CMD_MAX)){
     check_axis(Yaxis);
     check_axis(Xaxis);
     check_axis(Zaxis);
+    }
+  else if(!pass && CMD_B > CMD_MAX){
+      if(serial_dbg){
+        Serial.print(CMD_B);
+        Serial.println(" waiting for buffer");
+      }
+      delay(10);
     }
   
   }
@@ -370,9 +414,72 @@ void check_input(){
 
 
 void check_axis(Axis &axis){
-  if(axis.moved()){
-    jogAxis(axis, 1);
+  if(axis.moved() && inc_mode ){
+    incJogAxis(axis, 1);
     axis.resetPos();
+  }
+
+  if(axis.vel == 0 && axis.running && !inc_mode){
+      Serial2.flush();
+      Serial2.write(CMD_JOG_CANCEL); 
+      Serial2.flush();
+      if(serial_dbg){
+        Serial.println("ABORT!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+      }
+      int cnt = 0;
+      while(CMD_B != 0){
+        if(serial_dbg){
+          Serial.print(CMD_B);
+          Serial.println("????");
+          if(cnt > 10){
+            Serial2.flush();
+            Serial2.write(CMD_JOG_CANCEL); 
+            Serial2.flush();
+            cnt = 0;
+          }
+          cnt++;
+          // TODO:  this is a copy of what is in the main loop, refactor into function
+          if (Serial2.available()) {
+            // check for a command
+            getLine();
+        
+            // if a new command is found do somethign with it
+            if(newCMD){
+              parseCmd();
+              
+              // reset new command flat
+              newCMD = false;
+              if(pass || serial_dbg){
+                Serial.print(cmd);
+                Serial.print("\n");
+                }
+            }
+          }
+          delay(250);
+          // end line check
+        }
+      }
+      stepSize = 0.01;
+      axis.notRunning();
+    }
+     
+  if(axis.vel != 0 && axis.moved() && !inc_mode){
+    if (axis.vel < 5){
+      stepSize = 0.5;
+      velJogAxis(axis,1);
+      axis.setRunning();
+    }
+    else if (axis.vel < 10){
+      stepSize = 1.0;
+      velJogAxis(axis,1);
+      axis.setRunning();
+    }
+    else if (axis.vel >= 10){
+      stepSize = 5.0;
+      velJogAxis(axis,1);
+      axis.setRunning();
+    }
+    axis.resetPos();  
   }
 }
 
@@ -452,6 +559,9 @@ void drawStatus(std::string &c){
 void drawPOS(float x, float y, float z){
   display.setTextColor(WHITE, BLACK);
   display.setCursor(0,5);
+  if(Xaxis.running){
+    display.print("-");
+  }
   display.print("X: ");
   display.println(oldPos.mpos.x);
   display.print("Y: ");
@@ -465,6 +575,11 @@ void drawMode(){
 
   display.setTextColor(WHITE,BLACK);
   display.setCursor(5,45);
+  if(inc_mode){
+    display.print("i");
+  }else{
+    display.print("a");
+  }
   display.print(current_mode.c_str());
 }
 
@@ -491,6 +606,9 @@ void parseCmd(){
       // How do I tell which command this was for?
       //Serial.println("OK!");
       _gs.d_cmd = "OK";
+      if(CMD_B != 0){
+        CMD_B--;
+      }
       if(waiting){
         waiting = false;
       }
@@ -516,7 +634,7 @@ void parseCmd(){
     _gs.d_status = "Run";
     // lock out input.  need a better way!
     // I can also adjust speed/feeds when in this mode.  button, toggle?
-    waiting = true;
+    //waiting = true;
     handleError();
   }
   else{
@@ -529,9 +647,14 @@ void parseCmd(){
 
 // TODO: refactor this into Axis class
 void calculate_velocity(){
+  if(!pass){
+    Xaxis.velocity();
+    Yaxis.velocity();
+    Zaxis.velocity();
+  }
+  /*
   x_newposition = Xaxis.getPos();
   x_newtime = millis();
-  //x_vel = (( x_newposition - x_oldposition)/( x_newtime - x_oldtime)) * 12000 ;
   x_vel = abs(x_newposition - x_oldposition) * 1000 /( x_newtime - x_oldtime);
   Serial.print("pos: ");
   Serial.print(x_newposition);   
@@ -539,6 +662,7 @@ void calculate_velocity(){
   Serial.println (x_vel);
   x_oldposition = x_newposition;
   x_oldtime = x_newtime;  
+  */
 }
 
 void setup() {
@@ -633,7 +757,7 @@ void loop() { // run over and over
       
       // reset new command flat
       newCMD = false;
-      if(pass){
+      if(pass || serial_dbg){
         Serial.print(cmd);
         Serial.print("\n");
         }
@@ -650,9 +774,9 @@ void loop() { // run over and over
     }
     
   // check encoders
-  if (idle){
-    check_input();
-  }
+  
+  check_input();
+  
 
   
 

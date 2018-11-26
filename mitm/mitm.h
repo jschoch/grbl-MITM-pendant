@@ -9,6 +9,12 @@ class Axis {
     volatile long old_pos;
     volatile long pos;
     volatile bool forward;
+    long vel_new_pos;
+    long vel_old_pos;
+    long vel;
+    bool running;
+    unsigned long newtime;
+    unsigned long oldtime;
     int feed;
     float step;
 
@@ -24,7 +30,10 @@ class Axis {
         axis_name = in_name;
         old_pos=1L;
         pos=1L;
+        running = false;
         forward = true;
+        oldtime = millis();
+        
     }
 
     bool moved() {
@@ -58,6 +67,27 @@ class Axis {
 
     void resetPos(){
       old_pos = pos;
+    }
+
+    void setRunning(){
+      running = true;
+    }
+    
+    void notRunning(){
+      running = false;
+    }
+    long velocity(){
+      newtime = millis();
+      vel = abs(pos - vel_old_pos) * 1000 / (newtime - oldtime);
+      /*
+      Serial.print("pos: ");
+      Serial.print(pos);   
+      Serial.print (" speed = ");
+      Serial.println (vel);
+      */
+      oldtime = newtime;
+      vel_old_pos = pos;
+      return vel;
     }
 
 };
