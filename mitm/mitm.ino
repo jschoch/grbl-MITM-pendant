@@ -201,8 +201,10 @@ void runG(const char* start, Axis axis, int steps){
   // TODO: should i check the state first before I try to move?  Grbl does this already
 
   Serial2.print(start);
-  Serial.print(prefixor);
-  Serial.print(start);
+
+  // no way to print this to UGS
+  //Serial.print(prefixor);
+  //Serial.print(start);
   runG(axis,steps);
   // finish 
   runG();
@@ -218,31 +220,41 @@ void runG(std::string &s){
 
 // sends the axis and feed parts of the jog
 void runG(Axis axis, int steps){
-  Serial.print(axis.axis_name);
+  
+  // no way to print this to UGS
+  //Serial.print(axis.axis_name);
+  
+  
   Serial2.print(axis.axis_name);
 
   if(!axis.forward){
-    Serial.print("-");
+    // no way to print this to UGS
+    //Serial.print("-");
     Serial2.print("-");
   }
 
-  Serial.print((steps * stepSize));
+  // no way to print this to UGS
+  //Serial.print((steps * stepSize));
   Serial2.print((steps * stepSize));
   
-  Serial.println(" F1000");
+  // no way to print this to UGS
+  //Serial.println(" F1000");
   Serial2.println(" F1000");
 }
 
 void runG(long distance){
   Serial2.print(distance);
-  Serial.print(distance);
+  // no way to print this to UGS
+  //Serial.print(distance);
 }
 
 
 // this just sends the end of line
 void runG(){
   // TODO:  should i just have runGln which prints eol
-  Serial.println("");
+
+  // no way to print this to UGS
+  //Serial.println("");
   Serial2.println("");
 }
 
@@ -285,11 +297,12 @@ void check_mode(){
   updateStepSize();
 
   //TODO:  should check other buttons.  Need alarm reset button, home, and G54
+  // TODO:  add debounce for step size btns.
   
 }
 
 void updateStepSize(){
-  if(stepCnt < 1){
+  if(stepCnt <= 1){
     stepCnt = 1;
     stepSize = 0.01;
   }else{
@@ -388,29 +401,7 @@ void handleError(){
 
   // TODO:  how do you ensure you are not parsing error codes from a job?
   // TODO: redo the switch as something else
-
-  //Serial.print("Error: ");
-  //Serial.println(cmd);
-
-  /*  this doesn't work switch doesn't like String, you need to parse out the int in the error number
-  switch (cmd){
-    case "error:8":
-      Serial.prinln("machine in alarm, cannot jog!  Press Alarm reset if safe");
-      break;
-
-    case "error:2":
-      Serial.println("no feed set.  Set a feedrate!");
-
-    case "error:15":
-      Serial.println("Jog would exceed machine boundary.  Update soft limits or don't jog beyond the machine");
-
-    default: 
-      Serial.println(" unknown msg!");
-      Serial.print(cmd);
-      Serial.println("DISASTER!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-
-  }
-  */
+ 
 }
 
 
@@ -587,18 +578,14 @@ void loop() { // run over and over
 
     // if a new command is found do somethign with it
     if(newCMD){
-      //if(waiting){
-        // TODO: no way to tell if the ok clears "waiting" or some other command!??  figure out how to do this or just parsse it once.
-        //checkOk();
-        // do something with cmd here
-      //}else{
-        parseCmd();
-      //}
-
+      parseCmd();
+      
       // reset new command flat
       newCMD = false;
-      Serial.print(cmd);
-      Serial.print("\n");
+      if(pass){
+        Serial.print(cmd);
+        Serial.print("\n");
+        }
     }
   }
   if (Serial.available()) {
