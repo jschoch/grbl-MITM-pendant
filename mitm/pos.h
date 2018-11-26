@@ -1,3 +1,5 @@
+// parses and deals with the machine position for both work and machine position.
+
 #include <string>
 #include <vector>
 #include "gstate.h"

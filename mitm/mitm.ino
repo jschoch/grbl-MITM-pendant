@@ -95,7 +95,7 @@ Neotimer mytimer = Neotimer(100);
 
 // timer for getting status
 
-Neotimer lasttimer = Neotimer(1500);
+Neotimer lasttimer = Neotimer(100);
 
 
 // display stuff
@@ -116,7 +116,7 @@ bool idle = true;
 bool waiting = false;
 
 int feedXY = 500;
-int rapidXY = 1000;
+int rapidXY = 2000;
 float stepSize = 0.01;
 
 //  STM32 encoder stuff
@@ -182,6 +182,14 @@ void func_timer_3(){
 
 // uses internal timer 4 on PB6 and PB7
 //  not used
+
+// velocity
+
+long x_newposition;
+long x_oldposition = 0;
+unsigned long x_newtime;
+unsigned long x_oldtime = 0;
+long x_vel;
 
 
 void config_timer(int channel, HardwareTimer this_timer, void (*func)()){
@@ -285,10 +293,10 @@ void cutAxis(int axis){
 void check_mode(){
   uint8_t x = digitalRead(btn1);
   if(buttons[0].read()){
-    current_mode = "Jog";
+    current_mode = "Jog Mode";
     pass = false;
   }else{
-    current_mode = "Pas";
+    current_mode = "Passive";
     pass = true;
   }
   
@@ -518,6 +526,21 @@ void parseCmd(){
   }
 }
 
+
+// TODO: refactor this into Axis class
+void calculate_velocity(){
+  x_newposition = Xaxis.getPos();
+  x_newtime = millis();
+  //x_vel = (( x_newposition - x_oldposition)/( x_newtime - x_oldtime)) * 12000 ;
+  x_vel = abs(x_newposition - x_oldposition) * 1000 /( x_newtime - x_oldtime);
+  Serial.print("pos: ");
+  Serial.print(x_newposition);   
+  Serial.print (" speed = ");
+  Serial.println (x_vel);
+  x_oldposition = x_newposition;
+  x_oldtime = x_newtime;  
+}
+
 void setup() {
   
   pinMode(PC13,OUTPUT);
@@ -631,6 +654,8 @@ void loop() { // run over and over
     check_input();
   }
 
+  
+
   if(mytimer.repeat()){
     display.clearDisplay();
     //display.print(".");
@@ -643,16 +668,17 @@ void loop() { // run over and over
   }
 
   // brute force updater
-  if(lasttimer.repeat()){
+  if(lasttimer.repeat() ){
+    calculate_velocity();
+    
     // TODO:  should only ask for status if the sender isn't polling
-    if((millis() - lastUpdate) > 1000){
+    if((millis() - lastUpdate) > 1000 || !pass){
       Serial2.println("?");
       lastUpdate = millis();
     }
-    //Serial2.println("?");
-    //Serial.println("?");
+    
     digitalWrite(PC13, (!digitalRead(PC13)));
-    //display_mallinfo();
+    
   }
 }
 
