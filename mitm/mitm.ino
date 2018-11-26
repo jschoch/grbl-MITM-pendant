@@ -28,6 +28,8 @@ mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
 
 */
 
+// TODO: in pass mode use wheels  to adjust feeds 
+
 #include "HardwareTimer.h"
 #include "mitm.h"
 #include <string>
@@ -40,6 +42,24 @@ mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
 #include "gstate.h"
 #include "pos.h"
 
+
+// thinking of encoders which need pulldown like optointerruptor
+
+
+//#define pullup false;
+//#define pullup true;
+
+uint8_t btn1 = PB5;
+uint8_t btn2 = PB4;
+uint8_t btn3 = PB3;
+uint8_t btn4 = PA15;
+
+std::string current_mode = "Startup";
+bool pass = true;
+uint8_t stepCnt = 1;
+
+// seems to cause usb connection to reset!
+uint8_t btn5 = PA12;
 
 
 // globals for parsing Serial2 (grbl) command responses
@@ -159,11 +179,11 @@ void func_timer_3(){
 //  not used
 
 
-void config_timer(HardwareTimer this_timer, void (*func)()){
+void config_timer(int channel, HardwareTimer this_timer, void (*func)()){
   this_timer.pause(); //stop... 
 
   // setMode(channel, mode)  mode 0 was crashing but it was not supposed to be used!?
-  this_timer.setMode(1, TIMER_ENCODER); //set mode, the channel is not used when in this mode.
+  this_timer.setMode(channel, TIMER_ENCODER); //set mode, the channel is not used when in this mode.
   this_timer.setPrescaleFactor(1); //normal for encoder to have the lowest or no prescaler. 
   this_timer.setOverflow(PPR);    //use this to match the number of pulse per revolution of the encoder. Most industrial use 1024 single channel steps. 
   this_timer.setCount(0);          //reset the counter. 
@@ -234,7 +254,7 @@ void jogAxis(Axis axis, int steps){
   if (!waiting){
     waiting = true;
     runG("$J=G91 ",axis,steps);
-    _gs.d_cmd = "W";
+    _gs.d_cmd = "R";
   }else{
     _gs.d_cmd = "W";
   }
@@ -245,12 +265,66 @@ void cutAxis(int axis){
   //  how should this work, should it get the speed or use the current set speed?
 }
 
+void check_mode(){
+  uint8_t x = digitalRead(btn1);
+  if(x){
+    current_mode = "Jog";
+    pass = false;
+  }else{
+    current_mode = "Pas";
+    pass = true;
+  }
+  x = digitalRead(btn3);
+  if(x){
+    stepCnt++;
+  }
+  x = digitalRead(btn2);
+  if(x){
+    stepCnt--;
+  }
+  updateStepSize();
+
+  //TODO:  should check other buttons.  Need alarm reset button, home, and G54
+  
+}
+
+void updateStepSize(){
+  if(stepCnt < 1){
+    stepCnt = 1;
+    stepSize = 0.01;
+  }else{
+    if(stepCnt == 2){
+      stepSize = 0.1;
+    }
+    else if(stepCnt == 3){
+      stepSize = 0.5;
+    }
+    else if(stepCnt == 4){
+      stepSize = 1.0;
+    }
+    else if(stepCnt == 5){
+      stepSize = 5.0;
+    }
+    else{
+      stepSize = 10.0;
+      stepCnt = 6;
+    }
+  }
+}
 
 void check_input(){
-  check_axis(Yaxis);
-  check_axis(Xaxis);
-  check_axis(Zaxis);
+  check_mode();
+
+  // TODO:   should display some warning that you are trying to jog in pass mode or if you are trying to run a job in jog mode.
+  if(!pass){
+    check_axis(Yaxis);
+    check_axis(Xaxis);
+    check_axis(Zaxis);
+    }
+  
   }
+  
+
 
 void check_axis(Axis &axis){
   if(axis.moved()){
@@ -366,7 +440,20 @@ void drawPOS(float x, float y, float z){
   display.setCursor(0,0);
 }
 
+void drawMode(){
 
+  display.setTextColor(WHITE,BLACK);
+  display.setCursor(5,45);
+  display.print(current_mode.c_str());
+}
+
+void drawStep(){
+  display.setTextColor(WHITE,BLACK);
+  display.setCursor(90,25);
+  display.print("S:");
+  display.print(stepSize);
+  
+}
 /*
 void checkOk(){
   //having this twice is stupid
@@ -388,21 +475,24 @@ void parseCmd(){
       }
   }
   else if(strcasestr(cmd, "<Jog") != NULL){
-    _gs.d_status ="JOG";
+    _gs.d_status ="Jog";
   }
   else if(strcasestr(cmd, "<Idle") != NULL){
-    _gs.d_status = "IDLE";
+    _gs.d_status = "Idle";
   }
   else if(strcasestr(cmd, "<error:") != NULL){
     _gs.d_cmd = "ER";
+    _gs.d_status = "Error";
     handleError();
   }
   else if(strcasestr(cmd, "<Alarm") != NULL){
     _gs.d_cmd = "Alarm";
+    _gs.d_status = "Alarm";
     handleError();
   }
   else if(strcasestr(cmd, "<Run") != NULL){
     _gs.d_cmd = "RUN";
+    _gs.d_status = "Run";
     // lock out input.  need a better way!
     // I can also adjust speed/feeds when in this mode.  button, toggle?
     waiting = true;
@@ -424,9 +514,19 @@ void setup() {
   pinMode(PA7, INPUT_PULLUP);
   //pinMode(PB6, INPUT_PULLUP);
   //pinMode(PB7, INPUT_PULLUP);
+  pinMode(PB0, INPUT_PULLUP);
+  pinMode(PB1, INPUT_PULLUP);
+
+  
   pinMode(PA8, INPUT_PULLUP);
   pinMode(PA9, INPUT_PULLUP);
 
+  // buttons
+  pinMode(btn1, INPUT_PULLUP);
+  pinMode(btn2, INPUT_PULLUP);
+  pinMode(btn3, INPUT_PULLUP);
+  pinMode(btn4, INPUT_PULLUP);
+  pinMode(btn5, INPUT_PULLUP);
 
   // i2c
   //pinMode(PB6, INPUT_PULLUP);
@@ -455,9 +555,9 @@ void setup() {
 
   display.println("Ready to configure timer");
 
-  config_timer(timer_1,func_timer_1);
-  config_timer(timer_2,func_timer_2);
-  config_timer(timer_3,func_timer_3);
+  config_timer(1, timer_1,func_timer_1);
+  config_timer(1, timer_2,func_timer_2);
+  config_timer(1, timer_3,func_timer_3);
   display.display();
 
   // setup axis objects
@@ -517,6 +617,8 @@ void loop() { // run over and over
     drawCMD(_gs.d_cmd);
     drawStatus(_gs.d_status);
     drawPOS(0.0,0.0,0.0);
+    drawMode();
+    drawStep();
     display.display();
   }
 
