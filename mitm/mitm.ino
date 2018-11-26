@@ -41,7 +41,8 @@ mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
 #include <neotimer.h>
 #include "gstate.h"
 #include "pos.h"
-
+#include <Bounce2.h>
+#include "grbl.h"
 
 // thinking of encoders which need pulldown like optointerruptor
 
@@ -53,6 +54,10 @@ uint8_t btn1 = PB5;
 uint8_t btn2 = PB4;
 uint8_t btn3 = PB3;
 uint8_t btn4 = PA15;
+
+const int NUM_BUTTONS = 4;
+const uint8_t BUTTON_PINS[NUM_BUTTONS] = {btn1,btn2,btn3,btn4};
+Bounce * buttons = new Bounce[NUM_BUTTONS];
 
 std::string current_mode = "Startup";
 bool pass = true;
@@ -279,21 +284,35 @@ void cutAxis(int axis){
 
 void check_mode(){
   uint8_t x = digitalRead(btn1);
-  if(x){
+  if(buttons[0].read()){
     current_mode = "Jog";
     pass = false;
   }else{
     current_mode = "Pas";
     pass = true;
   }
-  x = digitalRead(btn3);
-  if(x){
+  
+  if(buttons[1].rose()){
     stepCnt++;
   }
+  if(buttons[2].rose()){
+     //  send unlock
+     Serial2.println("$X");
+  }
+  if(buttons[3].rose()){
+     //  TODO:  add stop jog command here
+     Serial2.println(CMD_JOG_CANCEL);
+  }
+
+  // TODO: decide if you need 2 buttons for step size
+  /*
   x = digitalRead(btn2);
   if(x){
     stepCnt--;
   }
+  */
+
+  
   updateStepSize();
 
   //TODO:  should check other buttons.  Need alarm reset button, home, and G54
@@ -318,9 +337,12 @@ void updateStepSize(){
     else if(stepCnt == 5){
       stepSize = 5.0;
     }
+    else if(stepCnt == 6){
+      stepSize = 10.0;
+    }
     else{
       stepSize = 10.0;
-      stepCnt = 6;
+      stepCnt = 1;
     }
   }
 }
@@ -440,7 +462,7 @@ void drawMode(){
 
 void drawStep(){
   display.setTextColor(WHITE,BLACK);
-  display.setCursor(90,25);
+  display.setCursor(85,25);
   display.print("S:");
   display.print(stepSize);
   
@@ -513,12 +535,18 @@ void setup() {
   pinMode(PA9, INPUT_PULLUP);
 
   // buttons
+
+  /*
   pinMode(btn1, INPUT_PULLUP);
   pinMode(btn2, INPUT_PULLUP);
   pinMode(btn3, INPUT_PULLUP);
   pinMode(btn4, INPUT_PULLUP);
   pinMode(btn5, INPUT_PULLUP);
-
+  */
+  for (int i = 0; i < NUM_BUTTONS; i++) {
+    buttons[i].attach( BUTTON_PINS[i] , INPUT_PULLUP  );       //setup the bounce instance for the current button
+    buttons[i].interval(50);              // interval in ms
+  }
   // i2c
   //pinMode(PB6, INPUT_PULLUP);
   //pinMode(PB7, INPUT_PULLUP);
@@ -591,8 +619,13 @@ void loop() { // run over and over
   if (Serial.available()) {
     Serial2.write(Serial.read());
   }
-  
 
+  // check buttons
+  for (int i = 0; i < NUM_BUTTONS; i++)  {
+    // Update the Bounce instance :
+    buttons[i].update();
+    }
+    
   // check encoders
   if (idle){
     check_input();
