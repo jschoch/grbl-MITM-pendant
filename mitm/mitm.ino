@@ -44,473 +44,37 @@ mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
 #include <Bounce2.h>
 #include "grbl.h"
 
-// thinking of encoders which need pulldown like optointerruptor
+// Vars
 
+bool newResp = false;
+bool newPush = false;
+bool newMsg = false;
+bool serial_dbg = true;
+bool halted = false;
 
-//#define pullup false;
-//#define pullup true;
+// wait for buffer to clear
+bool okWait = false;
 
-uint8_t btn1 = PB5;
-uint8_t btn2 = PB4;
-uint8_t btn3 = PB3;
-uint8_t btn4 = PA15;
-uint8_t btn5 = PB12;
+// flag for passive mode;
+bool pass = false;
 
+// buffer control
+
+// CMD_B is the counter for outstanding commands
 uint8_t CMD_B = 0;
-const uint8_t CMD_MAX = 12;
+const uint8_t CMD_MAX = 9;
 
-const int NUM_BUTTONS = 5;
-const uint8_t BUTTON_PINS[NUM_BUTTONS] = {btn1,btn2,btn3,btn4,btn5};
-Bounce * buttons = new Bounce[NUM_BUTTONS];
-
-std::string current_mode = "Startup";
-bool pass = true;
-uint8_t stepCnt = 1;
-
-bool serial_dbg = false;
-
-// inc_mode moves one stepSize.  inc_mode false activates acceleration mode.
-// acceleration mode attempts to queue moves and to stop motion when the velocity of the wheel is zero.
-bool inc_mode = true;
-
-// seems to cause usb connection to reset!
-//uint8_t btn5 = PA12;
-
-
+// serial vars
 // globals for parsing Serial2 (grbl) command responses
 const byte numChars = 255;
 char cmd[numChars];   // an array to store the received data
-
-
-boolean newCMD = false;
 static byte ndx = 0;
 char endMarker = '\n';
 char rc;
 
-// update timer thing
-
-unsigned long lastUpdate = 0;
-
-// _gs holds x,y,z coordinates
-
-Gstate _gs;
-
-// holds last position, not used to compare right now
-
-PosSet oldPos = {Pos(),Pos(),false};
-
-// timer for updating screen
-
-Neotimer mytimer = Neotimer(100);
-
-// timer for getting status
-
-Neotimer lasttimer = Neotimer(100);
-
-
-// display stuff
-#define SSD1306_128_64
-#define OLED_RESET 4
-Adafruit_SSD1306 display(OLED_RESET);
-
-// Serial rates
-
-
-unsigned long rate1 = 115200;
-unsigned long rate2 = 115200;
-
-// TODO:  consider extended ascii, will it be ignored by the sender?
-const char* prefixor = "P <<<";
-
-bool idle = true;
-bool waiting = false;
-
-int feedXY = 500;
-int rapidXY = 2000;
-float stepSize = 0.01;
-
-//  STM32 encoder stuff
-
-//
-// PA8/PA9 timer_1
-// PA0/PA1 timer_2
-// PB6/PB7 timer_3
-//
-
-
-int PPR = 2;
-
-HardwareTimer timer_1(1);
-
-Axis Xaxis("X",timer_1);
-
-
-void func_timer_1(){
-   if(timer_1.getDirection()){
-      Xaxis.forward = true;
-      Xaxis.decrPos();
-  }else{
-      Xaxis.forward = false;
-      Xaxis.incrPos();
-  }    
-}
-
-// uses internal timer 2 on PA0 and PA1
-HardwareTimer timer_2(2);
-
-Axis Zaxis("Z",timer_2);
-
-void func_timer_2(){
-   if(timer_2.getDirection()){
-      Zaxis.forward = true;
-      Zaxis.decrPos();
-  }else{
-      Xaxis.forward = false;
-      Zaxis.incrPos();
-  }    
-}
-
-
-
-// use internal timer 3 on PA 6/7
-
-HardwareTimer timer_3(3);
-
-volatile long ypos = 0;
-volatile long yold_pos = 2;
-Axis Yaxis("Y", timer_3);
-
-void func_timer_3(){
-   if(timer_3.getDirection()){
-      Yaxis.forward = true;
-      Yaxis.decrPos();
-  }else{
-      Yaxis.forward = false;
-      Yaxis.incrPos();
-  }    
-}
-
-// uses internal timer 4 on PB6 and PB7
-//  not used
-
-// velocity
-
-long x_newposition;
-long x_oldposition = 0;
-unsigned long x_newtime;
-unsigned long x_oldtime = 0;
-long x_vel;
-
-
-void config_timer(int channel, HardwareTimer this_timer, void (*func)()){
-  this_timer.pause(); //stop... 
-
-  // setMode(channel, mode)  mode 0 was crashing but it was not supposed to be used!?
-  this_timer.setMode(channel, TIMER_ENCODER); //set mode, the channel is not used when in this mode.
-  this_timer.setPrescaleFactor(1); //normal for encoder to have the lowest or no prescaler. 
-  this_timer.setOverflow(PPR);    //use this to match the number of pulse per revolution of the encoder. Most industrial use 1024 single channel steps. 
-  this_timer.setCount(0);          //reset the counter. 
-  this_timer.setEdgeCounting(TIMER_SMCR_SMS_ENCODER3); //or TIMER_SMCR_SMS_ENCODER1 or TIMER_SMCR_SMS_ENCODER2. This uses both channels to count and ascertain direction. 
-  this_timer.attachInterrupt(0, func); //channel doesn't mean much here either.  
-  this_timer.resume();
-}
-
-
-// send a command to grbl.  
-// TODO ensure the steps are calculated per axis
-// TODO ensure the feed speed are calculated per axis
-void runG(const char* start, Axis axis, int steps){
-
-  // TODO: should i check the state first before I try to move?  Grbl does this already
-
-  Serial2.print(start);
-
-  // no way to print this to UGS
-  if (serial_dbg){
-    Serial.print(prefixor);
-    Serial.print(start);
-  }
-  runG(axis,steps);
-  // finish 
-  runG();
-}
-
-
-
-
-// sends the axis and feed parts of the jog
-void runG(Axis axis, int steps){
-
-  
-  // no way to print this to UGS
-  if (serial_dbg){
-    Serial.print(axis.axis_name);
-  }
-  
-  Serial2.print(axis.axis_name);
-
-  if(!axis.forward){
-    if (serial_dbg){
-    // no way to print this to UGS
-      Serial.print("-");
-    }
-    Serial2.print("-");
-  }
-
-  // no way to print this to UGS
-  if (serial_dbg){
-    Serial.print((steps * stepSize));
-  }
-  Serial2.print((steps * stepSize));
-  
-  // no way to print this to UGS
-  if (serial_dbg){
-    Serial.println(" F1000");
-  }
-  Serial2.println(" F1000");
-  CMD_B++;
-}
-
-void runG(long distance){
-  Serial2.print(distance);
-  // no way to print this to UGS
-  if (serial_dbg){
-    Serial.print(distance);
-    
-  }
-}
-
-
-// this just sends the end of line
-void runG(){
-  // TODO:  should i just have runGln which prints eol
-
-  // no way to print this to UGS
-  if (serial_dbg){
-    Serial.println("");
-  }
-  Serial2.println("");
-}
-
-// TODO: distance should be float modified by step size
-// shoudl be able to queue some number of moves based on formula described on grbl jog docs
-// in other modes incremental distance works
-
-void incJogAxis(Axis axis, int steps){
-  if (!waiting){
-    waiting = true;
-    runG("$J=G91 ",axis,steps);
-    _gs.d_cmd = "R";
-  }else{
-    _gs.d_cmd = "W";
-    _gs.d_status = "Waiting";
-  }
-}
-
-void velJogAxis(Axis axis, int steps){
-  runG("$J=G91 ",axis,steps);
-  _gs.d_cmd = "A";
-  _gs.d_status = "VelJog";
-  
-}
-
-
-void cutAxis(int axis){
-  //  how should this work, should it get the speed or use the current set speed?
-}
-
-void check_mode(){
-  uint8_t x = digitalRead(btn1);
-  if(buttons[0].read()){
-    current_mode = "Jog Mode";
-    pass = false;
-  }else{
-    current_mode = "Passive";
-    pass = true;
-  }
-  
-  if(buttons[1].rose()){
-    stepCnt++;
-  }
-  
-
-  if(buttons[2].rose()){
-      inc_mode = !inc_mode;
-  }
-  if(buttons[3].rose()){
-     //  send unlock
-     Serial2.println("$X");
-  }
-  
-  if(buttons[4].rose()){
-     //  TODO:  add stop jog command here
-     Serial2.flush();
-     Serial2.write(CMD_JOG_CANCEL);
-     Serial2.flush();
-  }
-
-  // TODO: decide if you need 2 buttons for step size
-  /*
-  x = digitalRead(btn2);
-  if(x){
-    stepCnt--;
-  }
-  */
-
-  
-  updateStepSize();
-
-  //TODO:  should check other buttons.  Need alarm reset button, home, and G54
-  // TODO:  add debounce for step size btns.
-  
-}
-
-void updateStepSize(){
-  if(stepCnt <= 1){
-    stepCnt = 1;
-    stepSize = 0.01;
-  }else{
-    if(stepCnt == 2){
-      stepSize = 0.1;
-    }
-    else if(stepCnt == 3){
-      stepSize = 0.5;
-    }
-    else if(stepCnt == 4){
-      stepSize = 1.0;
-    }
-    else if(stepCnt == 5){
-      stepSize = 5.0;
-    }
-    else if(stepCnt == 6){
-      stepSize = 10.0;
-    }
-    else{
-      stepSize = 10.0;
-      stepCnt = 1;
-    }
-  }
-}
-
-void check_input(){
-  check_mode();
-
-  // TODO:   should display some warning that you are trying to jog in pass mode or if you are trying to run a job in jog mode.
-  if(!pass && (CMD_B <= CMD_MAX)){
-    check_axis(Yaxis);
-    check_axis(Xaxis);
-    check_axis(Zaxis);
-    }
-  else if(!pass && CMD_B > CMD_MAX){
-      if(serial_dbg){
-        Serial.print(CMD_B);
-        Serial.println(" waiting for buffer");
-      }
-      delay(10);
-    }
-  
-  }
-  
-
-
-void check_axis(Axis &axis){
-  if(axis.moved() && inc_mode ){
-    incJogAxis(axis, 1);
-    axis.resetPos();
-  }
-
-  if(axis.vel == 0 && axis.running && !inc_mode){
-      Serial2.flush();
-      Serial2.write(CMD_JOG_CANCEL); 
-      Serial2.flush();
-      if(serial_dbg){
-        Serial.println("ABORT!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-      }
-      int cnt = 0;
-      while(CMD_B != 0){
-        if(serial_dbg){
-          Serial.print(CMD_B);
-          Serial.println("????");
-          if(cnt > 10){
-            Serial2.flush();
-            Serial2.write(CMD_JOG_CANCEL); 
-            Serial2.flush();
-            cnt = 0;
-          }
-          cnt++;
-          // TODO:  this is a copy of what is in the main loop, refactor into function
-          if (Serial2.available()) {
-            // check for a command
-            getLine();
-        
-            // if a new command is found do somethign with it
-            if(newCMD){
-              parseCmd();
-              
-              // reset new command flat
-              newCMD = false;
-              if(pass || serial_dbg){
-                Serial.print(cmd);
-                Serial.print("\n");
-                }
-            }
-          }
-          delay(250);
-          // end line check
-        }
-      }
-      stepSize = 0.01;
-      axis.notRunning();
-    }
-     
-  if(axis.vel != 0 && axis.moved() && !inc_mode){
-    if (axis.vel < 5){
-      stepSize = 0.5;
-      velJogAxis(axis,1);
-      axis.setRunning();
-    }
-    else if (axis.vel < 10){
-      stepSize = 1.0;
-      velJogAxis(axis,1);
-      axis.setRunning();
-    }
-    else if (axis.vel >= 10){
-      stepSize = 5.0;
-      velJogAxis(axis,1);
-      axis.setRunning();
-    }
-    axis.resetPos();  
-  }
-}
-
-
-
-void check_pos(){
-  // issue ? command and parse reult
-}
-
-void hold(){
-  // issue ! command to enter feed hold
-}
-
-void jobCancel(){
-  // need motion cancel hardware button to quickly issue Jog Cancel command
-}
-
-void feedOverride(){
-  // feed override hard/soft keys
-}
-
-void draw(){
-  // draw on the display
-}
-
-void setMode(){
-  // Set current mode
-}
-
-void getLine() {
-    while (Serial2.available() > 0 && newCMD == false) {
+// reads a full message ending with \n
+void readLine(){
+  while (Serial2.available() > 0 && newMsg == false) {
         rc = Serial2.read();
 
         if (rc != endMarker) {
@@ -524,285 +88,151 @@ void getLine() {
             cmd[ndx] = '\0'; // terminate the string
             ndx = 0;
   
-            newCMD = true;
+            newMsg = true;
         }
     }
 }
 
-
-bool isError(String &cmd){
-  return false;
-}
-
-void handleError(){
-
-  // TODO:  how do you ensure you are not parsing error codes from a job?
-  // TODO: redo the switch as something else
- 
-}
-
-
-void drawCMD(std::string &c){
-  display.setTextColor(WHITE, BLACK);
-  display.setCursor(110,5);
-  display.print(c.c_str());
-  display.setCursor(0,0);
-}
-
-void drawStatus(std::string &c){
-  display.setTextColor(WHITE, BLACK);
-  display.setCursor(90,45);
-  display.print(c.c_str());
-  display.setCursor(0,0);
-}
-
-void drawPOS(float x, float y, float z){
-  display.setTextColor(WHITE, BLACK);
-  display.setCursor(0,5);
-  if(Xaxis.running){
-    display.print("-");
+void dbg(char* s){
+  if(serial_dbg){
+    Serial.print(s);
   }
-  display.print("X: ");
-  display.println(oldPos.mpos.x);
-  display.print("Y: ");
-  display.println(oldPos.mpos.y);
-  display.print("Z: ");
-  display.println(oldPos.mpos.z);
-  display.setCursor(0,0);
 }
-
-void drawMode(){
-
-  display.setTextColor(WHITE,BLACK);
-  display.setCursor(5,45);
-  if(inc_mode){
-    display.print("i");
-  }else{
-    display.print("a");
+void dbgln(char* s){
+  if(serial_dbg){
+    Serial.println(s);
   }
-  display.print(current_mode.c_str());
 }
 
-void drawStep(){
-  display.setTextColor(WHITE,BLACK);
-  display.setCursor(85,25);
-  display.print("S:");
-  display.print(stepSize);
+// process an 'ok' or 'error'
+void processResp(){
+  // look for error
+  if(strcasestr(cmd, "error") != NULL){
+     dbg("Error found");
+      dbgln(cmd);
+     }
+   // must be an 'ok'
+   else if(strcasestr(cmd,"ok") != NULL){
+      CMD_B--; 
+      if(CMD_B == 0){  
+        okWait = false;  
+      }
+      if(CMD_B < 0){
+        halt("lost track of commands!"); 
+      }
+   }
+   else{
+     dbgln("Nothing matched");
+     dbgln(cmd); 
+     halt("Unknown Cmd");
+   }
+}
+
+// process msg starting with [ or <
+void processPush(){
   
 }
-/*
-void checkOk(){
-  //having this twice is stupid
+
+// this should halt everything and wait to confirm the jog has been canceled.
+void cancelJog(){
+  okWait = true;
+  // TODO; update with header def
+  Serial2.flush();
+  Serial2.write(0x85);
+  Serial2.flush();
 }
-*/
 
-void parseCmd(){
 
-  // TODO:  should only really parst non-"ok" commands right?
-  updatePos(cmd, oldPos);
-  //lastUpdate = millis();
+// checks the buffer
+bool bufferFull(){
+  if(CMD_B < CMD_MAX){
+    return false;
+  }else{
+    // TODO:  debug to print out buffered commands
+    return true;
+  }
+}
 
-  if(strcasestr(cmd, "ok") != NULL){
-      // How do I tell which command this was for?
-      //Serial.println("OK!");
-      _gs.d_cmd = "OK";
-      if(CMD_B != 0){
-        CMD_B--;
-      }
-      if(waiting){
-        waiting = false;
-      }
+void checkJogInputs(){
+  // 
+}
+
+void checkCtrlInputs(){
+  // checks buttons and any other non-jog inputs
+}
+
+// process messages from grbl
+void parseMsg(){
+  if(newMsg){
+     // match push
+     if(cmd[0] == '[' || cmd[0] == '<'){
+      processPush();
+     }
+     // match resp
+     else {
+      processResp();
+     }// match push
+
+     // try "ok"
+
+     // fail and update GUI.
+  }else{
+    // blink or something
   }
-  else if(strcasestr(cmd, "<Jog") != NULL){
-    _gs.d_status ="Jog";
+}
+
+// Process any inputs to jog and ensure the commands are completing 
+void loopJog(){
+  parseMsg();
+
+  // Ensure no new commands are issued while waiting for buffer to clear.
+  if(okWait && CMD_B > 0){
+    // TODO:  update status msg here.
   }
-  else if(strcasestr(cmd, "<Idle") != NULL){
-    _gs.d_status = "Idle";
-  }
-  else if(strcasestr(cmd, "<error:") != NULL){
-    _gs.d_cmd = "ER";
-    _gs.d_status = "Error";
-    handleError();
-  }
-  else if(strcasestr(cmd, "<Alarm") != NULL){
-    _gs.d_cmd = "Alarm";
-    _gs.d_status = "Alarm";
-    handleError();
-  }
-  else if(strcasestr(cmd, "<Run") != NULL){
-    _gs.d_cmd = "RUN";
-    _gs.d_status = "Run";
-    // lock out input.  need a better way!
-    // I can also adjust speed/feeds when in this mode.  button, toggle?
-    //waiting = true;
-    handleError();
-  }
+  //
   else{
-    Serial.println("doh!");
-    Serial.print(cmd);
-    Serial.println("end");
+    if(bufferFull()){
+      
+    }else{
+      checkJogInputs();
+    }
   }
 }
 
-
-// TODO: refactor this into Axis class
-void calculate_velocity(){
-  if(!pass){
-    Xaxis.velocity();
-    Yaxis.velocity();
-    Zaxis.velocity();
-  }
-  /*
-  x_newposition = Xaxis.getPos();
-  x_newtime = millis();
-  x_vel = abs(x_newposition - x_oldposition) * 1000 /( x_newtime - x_oldtime);
-  Serial.print("pos: ");
-  Serial.print(x_newposition);   
-  Serial.print (" speed = ");
-  Serial.println (x_vel);
-  x_oldposition = x_newposition;
-  x_oldtime = x_newtime;  
-  */
+// watch for position updates and update gui
+void loopPass(){
+  
 }
+
+void halt(char * msg){
+  halted = true;
+  // TODO: update display;
+}
+
+
 
 void setup() {
-  
-  pinMode(PC13,OUTPUT);
-  pinMode(PA0, INPUT_PULLUP);
-  pinMode(PA1, INPUT_PULLUP);
-  pinMode(PA6, INPUT_PULLUP);
-  pinMode(PA7, INPUT_PULLUP);
-  //pinMode(PB6, INPUT_PULLUP);
-  //pinMode(PB7, INPUT_PULLUP);
-  pinMode(PB0, INPUT_PULLUP);
-  pinMode(PB1, INPUT_PULLUP);
+  // put your setup code here, to run once:
 
-  
-  pinMode(PA8, INPUT_PULLUP);
-  pinMode(PA9, INPUT_PULLUP);
-
-  // buttons
-
-  /*
-  pinMode(btn1, INPUT_PULLUP);
-  pinMode(btn2, INPUT_PULLUP);
-  pinMode(btn3, INPUT_PULLUP);
-  pinMode(btn4, INPUT_PULLUP);
-  pinMode(btn5, INPUT_PULLUP);
-  */
-  for (int i = 0; i < NUM_BUTTONS; i++) {
-    buttons[i].attach( BUTTON_PINS[i] , INPUT_PULLUP  );       //setup the bounce instance for the current button
-    buttons[i].interval(50);              // interval in ms
-  }
-  // i2c
-  //pinMode(PB6, INPUT_PULLUP);
-  //pinMode(PB7, INPUT_PULLUP);
-
-
-
-  Serial.begin(rate1);
-
-
-  // Display stuff
-
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3c); 
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(WHITE);
-  display.setCursor(0,0);
-  display.println("Setup: ");
-  display.display();
-
-  display.println("Serial connected... connecting to grbl...");
-  // set the data rate for the SoftwareSerial port
-
-  // Using serial pins PA2/PA3
-  Serial2.begin(rate1);
-
-  display.println("Ready to configure timer");
-
-  config_timer(1, timer_1,func_timer_1);
-  config_timer(1, timer_2,func_timer_2);
-  config_timer(1, timer_3,func_timer_3);
-  display.display();
-
-  // setup axis objects
-
-  Yaxis.begin("Y", 1000, 0.01f);
-  Zaxis.begin("Z", 1000, 0.01f);
-  Xaxis.begin("X", 1000, 0.01f);
-
-
- 
-  display.println("Timer configured");
-  display.println("Running setup");
-
-  // TODO: get config when we can parse it
-  //Serial2.println("$$");
-
-  // TODO: here is set MM mode, how to deal with these preferences?
-  Serial2.println("G21");
-  display.display();
 }
 
-
-void loop() { // run over and over
-  if (Serial2.available()) {
-    // check for a command
-    getLine();
-
-    // if a new command is found do somethign with it
-    if(newCMD){
-      parseCmd();
-      
-      // reset new command flat
-      newCMD = false;
-      if(pass || serial_dbg){
-        Serial.print(cmd);
-        Serial.print("\n");
-        }
-    }
-  }
-  if (Serial.available()) {
-    Serial2.write(Serial.read());
+void loop() {
+  
+  // get stuff from serial and assemble messages from grbl.
+  readLine();
+  
+  // passive mode passes messages through from GUI.
+  // passive mode ignores commands but updates position data 
+  if(pass){
+    loopPass();
+  }else{
+    // Jog mode tracks commands and responses
+    loopJog();
   }
 
-  // check buttons
-  for (int i = 0; i < NUM_BUTTONS; i++)  {
-    // Update the Bounce instance :
-    buttons[i].update();
-    }
-    
-  // check encoders
-  
-  check_input();
-  
-
-  
-
-  if(mytimer.repeat()){
-    display.clearDisplay();
-    //display.print(".");
-    drawCMD(_gs.d_cmd);
-    drawStatus(_gs.d_status);
-    drawPOS(0.0,0.0,0.0);
-    drawMode();
-    drawStep();
-    display.display();
-  }
-
-  // brute force updater
-  if(lasttimer.repeat() ){
-    calculate_velocity();
-    
-    // TODO:  should only ask for status if the sender isn't polling
-    if((millis() - lastUpdate) > 1000 || !pass){
-      Serial2.println("?");
-      lastUpdate = millis();
-    }
-    
-    digitalWrite(PC13, (!digitalRead(PC13)));
-    
+  // TODO: consider key combo to unhalt
+  while(halted){
+    dbgln("HALT");
+    delay(1000);
   }
 }
-
