@@ -1,4 +1,7 @@
-- [ ] since we can't figure out which "ok" is for which command for jog's perhaps we should calculate the desired position and then wait until it is reached before clearing the "waiting" flag
+- [ ] refactor okWatcher branch:  since we can't figure out which "ok" is for which command for jog's perhaps we should calculate the desired position and then wait until it is reached before clearing the "waiting" flag
+- [ ] Add back encoder
+- [ ] Add back position parsing
+- [ ] tidy up msgs and display
 - [ x ] wire up encoders and change PPR.
 
 - [ X ] add OLED support
