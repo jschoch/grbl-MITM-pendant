@@ -2,6 +2,7 @@
 - [ ] Add back encoder
 - [ ] Add back position parsing
 - [ ] tidy up msgs and display
+- [ ] ensure buffer can't fill when running batchJog
 - [ x ] wire up encoders and change PPR.
 
 - [ X ] add OLED support

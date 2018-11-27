@@ -473,14 +473,19 @@ void halt(char * msg){
 }
 
 void batchJog(const char* start, Axis axis){
-  doJog(start,axis);
-  CMD_B++;
+  if(!bufferFull()){
+    doJog(start,axis);
+    CMD_B++;
+  }
 }
+  
 
 void waitJog(const char* start, Axis axis){
-  okWait = true;
-  doJog(start,axis);
-  CMD_B++;
+  if(!bufferFull()){
+    okWait = true;
+    doJog(start,axis);
+    CMD_B++;
+  }
 }
 
 void doJog(const char* start, Axis axis){
