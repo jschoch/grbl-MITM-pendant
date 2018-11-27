@@ -67,7 +67,7 @@ std::string current_mode = "Startup";
 bool pass = true;
 uint8_t stepCnt = 1;
 
-bool serial_dbg = true;
+bool serial_dbg = false;
 
 // inc_mode moves one stepSize.  inc_mode false activates acceleration mode.
 // acceleration mode attempts to queue moves and to stop motion when the velocity of the wheel is zero.
