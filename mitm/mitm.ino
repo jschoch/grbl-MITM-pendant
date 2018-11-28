@@ -237,6 +237,7 @@ void config_timer(int channel, HardwareTimer this_timer, void (*func)()){
   this_timer.setOverflow(PPR);    //use this to match the number of pulse per revolution of the encoder. Most industrial use 1024 single channel steps. 
   this_timer.setCount(0);          //reset the counter. 
   this_timer.setEdgeCounting(TIMER_SMCR_SMS_ENCODER3); //or TIMER_SMCR_SMS_ENCODER1 or TIMER_SMCR_SMS_ENCODER2. This uses both channels to count and ascertain direction. 
+  this_timer.refresh();
   this_timer.attachInterrupt(0, func); //channel doesn't mean much here either.  
   this_timer.resume();
 }
@@ -304,6 +305,7 @@ void processResp(){
 
 // process msg starting with [ or <
 void processPush(){
+  updatePos(cmd,oldPos);
   if(serial_dbg){
     Serial.print(cmd);
     Serial.print("\n");
@@ -372,7 +374,58 @@ void checkJogInputs(){
     batchJog("$J=G91 ", Xaxis);
     _gs.d_status = "batch";
   }
+
+  //  Encoder inputs
+  if(!pass && (CMD_B <= CMD_MAX)){
+    check_axis(Yaxis);
+    check_axis(Xaxis);
+    check_axis(Zaxis);
+    }
+  else if(!pass && CMD_B > CMD_MAX){
+      if(serial_dbg){
+        Serial.print(CMD_B);
+        Serial.println(" waiting for buffer");
+      }
+      delay(10);
+    }
 }
+
+void check_axis(Axis &axis){
+  if(axis.moved() && inc_mode ){
+    waitJog(axis);
+    axis.resetPos();
+  }
+
+  if(axis.vel == 0 && axis.running && !inc_mode){
+    // TODO: issue CMD_JOG_CANCEL
+    Serial2.write(CMD_JOG_CANCEL);
+    delay(200);
+    CMD_B = 1;
+    okWait = true;
+    Serial2.println("G4P0");
+  }
+
+  if(axis.vel != 0 && axis.moved() && !inc_mode){
+    if (axis.vel < 5){
+      stepSize = 0.5;
+      batchJog(axis);
+      axis.setRunning();
+    }
+    else if (axis.vel < 10){
+      stepSize = 1.0;
+      batchJog(axis);
+      axis.setRunning();
+    }
+    else if (axis.vel >= 10){
+      stepSize = 5.0;
+      batchJog(axis);
+      axis.setRunning();
+    }
+    axis.resetPos();  
+  }
+}
+
+
 
 void checkBtns(){
   for (int i = 0; i < NUM_BUTTONS; i++)  {
@@ -472,6 +525,10 @@ void halt(char * msg){
   // TODO: update display;
 }
 
+void batchJog(Axis axis){
+  batchJog("$J=G91 ",axis);
+}
+
 void batchJog(const char* start, Axis axis){
   if(!bufferFull()){
     doJog(start,axis);
@@ -480,6 +537,11 @@ void batchJog(const char* start, Axis axis){
 }
   
 
+// jogs axis one stepSize
+void waitJog(Axis axis){
+  waitJog("$J=G91 ", axis);
+}
+
 void waitJog(const char* start, Axis axis){
   if(!bufferFull()){
     okWait = true;
@@ -487,6 +549,8 @@ void waitJog(const char* start, Axis axis){
     CMD_B++;
   }
 }
+
+
 
 void doJog(const char* start, Axis axis){
 
