@@ -52,6 +52,7 @@ bool newMsg = false;
 bool serial_dbg = true;
 bool halted = false;
 bool disp_tick = false;
+uint8_t screen_tick = 0;
 
 // wait for buffer to clear
 bool okWait = false;
@@ -63,15 +64,17 @@ bool pass = false;
 
 // CMD_B is the counter for outstanding commands
 uint8_t CMD_B = 0;
-const uint8_t CMD_MAX = 9;
+const uint8_t CMD_MAX = 5;
 
 // serial vars
 // globals for parsing Serial2 (grbl) command responses
-const byte numChars = 255;
+const unsigned int numChars = 512;
 char cmd[numChars];   // an array to store the received data
-static byte ndx = 0;
+//static byte ndx = 0;
+static unsigned int ndx = 0;
 char endMarker = '\n';
 char rc;
+char readch;
 
 // btns
 
@@ -112,7 +115,7 @@ Neotimer mytimer = Neotimer(100);
 
 // timer for getting status
 
-Neotimer lasttimer = Neotimer(100);
+Neotimer lasttimer = Neotimer(50);
 
 
 // display stuff
@@ -220,7 +223,7 @@ long x_vel;
 // encoder velocity
 
 void calculate_velocity(){
-  if(!pass){
+  if(!pass && !inc_mode){
     Xaxis.velocity();
     Yaxis.velocity();
     Zaxis.velocity();
@@ -242,23 +245,55 @@ void config_timer(int channel, HardwareTimer this_timer, void (*func)()){
   this_timer.resume();
 }
 
+
 // reads a full message ending with \n
 void readLine(){
   while (Serial2.available() > 0 && newMsg == false) {
         rc = Serial2.read();
 
-        if (rc != endMarker) {
+        if (rc > 0 && rc != endMarker) {
             cmd[ndx] = rc;
             ndx++;
+            cmd[ndx] = '\0';
             if (ndx >= numChars) {
-                ndx = numChars - 1;
+                Serial.print("moar");
+                ndx = numChars ;
             }
         }
         else {
-            cmd[ndx] = '\0'; // terminate the string
+            //cmd[ndx] = '\0'; // terminate the string
+            Serial.print(ndx);
+            Serial.print("**********");
+            Serial.println(cmd);  
             ndx = 0;
-  
             newMsg = true;
+        }
+    }
+}
+
+void readLine2() {
+  while(Serial2.available() > 0 && newMsg == false){
+    doReadLine();
+  }
+}
+
+void doReadLine(){
+    static int pos = 0;
+    int rpos;
+    readch = Serial2.read();
+    if (readch > 0) {
+        switch (readch) {
+            //case '\r': // Ignore CR
+                //break;
+            case '\n': // Return on new-line
+                rpos = pos;
+                pos = 0;  // Reset position index ready for next time
+                newMsg = true;
+            default:
+                if (pos < numChars -2) {
+                    cmd[pos++] = readch;
+                    cmd[pos] = 0;
+                }
         }
     }
 }
@@ -284,16 +319,22 @@ void processResp(){
    // must be an 'ok'
    else if(strcasestr(cmd,"ok") != NULL){
       if(CMD_B == 0){
-        CMD_B = 0; 
+        //CMD_B = 0; 
         okWait = false;
       }else{
         CMD_B--;
       }
    }
    else{
-     dbgln("Nothing matched");
-     dbgln(cmd); 
-     //halt("Unknown Cmd");
+     dbg("Nothing matched:\n '");
+     dbg(cmd); 
+     dbg("'");
+     if(serial_dbg){
+        Serial.print(" ndx: ");
+        Serial.println(ndx);
+      }
+     _gs.d_status = "Halted: unknown command, hard reset to fix";
+     halt("Unknown Cmd");
    }
 
   if(serial_dbg){
@@ -315,12 +356,40 @@ void processPush(){
 
 // this should halt everything and wait to confirm the jog has been canceled.
 void cancelJog(){
+  doCancelJog();
+
+  // wait for IDLE
+  while(strcmp(oldPos.lastState,"Idle") != 0){
+    _gs.d_status = "Waiting for Idle";
+    Serial2.print("?");
+    readLine();
+    if(newMsg){
+      
+      parseMsg();
+    } 
+    //delay(50);
+    if(mytimer.repeat()){
+      drawDisplay();
+    }
+  }
+
+  // make jogs small and let buffer clear per chamnit
+  //doCancelJog();
+}
+
+
+void doCancelJog(){
   okWait = true;
   // TODO; update with header def
+
+  dbgln("Issuing cancel");
   Serial2.flush();
-  Serial2.write(0x85);
+  Serial2.write(CMD_JOG_CANCEL);
   Serial2.flush();
-  CMD_B = 1;
+
+  //dbgln("issuing G4P0");
+  //Serial2.println("G4P0");
+  //Serial2.flush();
 }
 
 void updateStepSize(){
@@ -385,8 +454,8 @@ void checkJogInputs(){
       if(serial_dbg){
         Serial.print(CMD_B);
         Serial.println(" waiting for buffer");
+        delay(100);
       }
-      delay(10);
     }
 }
 
@@ -397,27 +466,35 @@ void check_axis(Axis &axis){
   }
 
   if(axis.vel == 0 && axis.running && !inc_mode){
-    // TODO: issue CMD_JOG_CANCEL
-    Serial2.write(CMD_JOG_CANCEL);
-    delay(200);
-    CMD_B = 1;
-    okWait = true;
-    Serial2.println("G4P0");
+    stepSize = 0.1;
+    _gs.d_status = "JOG CANCEL";
+    axis.notRunning();
+    cancelJog();
   }
 
   if(axis.vel != 0 && axis.moved() && !inc_mode){
-    if (axis.vel < 5){
+    if(serial_dbg){
+      Serial.print("velocity: ");
+      Serial.print(axis.vel);
+    }
+    if (axis.vel < 100){
+      stepSize = 0.05;
+      batchJog(axis);
+      axis.setRunning();
+    }
+    else if (axis.vel < 250){
+      stepSize = 0.1;
+      batchJog(axis);
+      axis.setRunning();
+    }
+    else if (axis.vel < 400){
       stepSize = 0.5;
       batchJog(axis);
       axis.setRunning();
     }
-    else if (axis.vel < 10){
+    else if (axis.vel >= 600){
+      // max overshoot is stepSize * CMD_MAX, 2.5mm
       stepSize = 1.0;
-      batchJog(axis);
-      axis.setRunning();
-    }
-    else if (axis.vel >= 10){
-      stepSize = 5.0;
       batchJog(axis);
       axis.setRunning();
     }
@@ -440,8 +517,13 @@ void checkCtrlInputs(){
 
   // checks buttons and any other non-jog inputs
   if(buttons[0].read()){
-    current_mode = "Jog Mode";
     pass = false;
+    if (inc_mode){
+      current_mode = "Step Jog ";
+      }else{
+      current_mode = "Speed Jog"; 
+    }
+    
   }else{
     current_mode = "Passive";
     pass = true;
@@ -454,6 +536,13 @@ void checkCtrlInputs(){
 
   if(buttons[2].rose()){
       inc_mode = !inc_mode;
+      if(inc_mode){
+        
+      }else{
+        // reset states
+        CMD_B = 0; 
+        okWait = 0;
+      }
   }
 
   /*
@@ -479,6 +568,9 @@ void parseMsg(){
      if(cmd[0] == '[' || cmd[0] == '<'){
       processPush();
      }
+     else if(cmd[0] == '\n'){
+      Serial.println(" empty cmd");
+     }
      // match resp
      else {
       processResp();
@@ -501,11 +593,13 @@ void loopJog(){
   }
   //
   else{
+    checkJogInputs();
     if(bufferFull()){
-      _gs.d_status = "buf full"; 
+      _gs.d_status = "Buff Full"; 
+      
     }else{
-      checkJogInputs();
-      _gs.d_status = "check jog";
+      //checkJogInputs();
+      _gs.d_status = "Waiting for jog";
     }
   }
 }
@@ -572,26 +666,39 @@ void doJog(const char* start, Axis axis){
 
 void drawCMD(std::string &c){
   display.setTextColor(WHITE, BLACK);
-  display.setCursor(0,1);
-  display.print(disp_tick);
-  disp_tick = !disp_tick;
+  display.setCursor(51,1);
+
+  //display.print(disp_tick);
+  //disp_tick = !disp_tick;
+
   display.print("-");
   display.print(CMD_B);
   display.print(c.c_str());
-  display.print(" okWait: ");
-  display.print(okWait);
+  //display.print(" okWait: ");
+  //display.print(okWait);
   display.setCursor(0,0);
 }
 
+int tick_line(){
+  screen_tick++;
+  if(screen_tick >= 128){
+    screen_tick = 0;
+  }
+  return screen_tick;
+}
+
+// draws _gs.d_cmd
 void drawStatus(std::string &c){
+  display.drawFastHLine(tick_line(), 50,30, WHITE);
   display.setTextColor(WHITE, BLACK);
-  display.setCursor(90,45);
+  display.setCursor(0,42);
   display.print(c.c_str());
+  //display.print();
 }
 
 void drawPOS(float x, float y, float z){
   display.setTextColor(WHITE, BLACK);
-  display.setCursor(0,15);
+  display.setCursor(0,16);
   if(Xaxis.running){
     display.print("-");
   }
@@ -606,20 +713,35 @@ void drawPOS(float x, float y, float z){
 void drawMode(){
 
   display.setTextColor(WHITE,BLACK);
-  display.setCursor(0,50);
+  display.setCursor(0,0);
   if(inc_mode){
     display.print("i");
   }else{
     display.print("a");
   }
   display.print(current_mode.c_str());
+  display.print(" | ");
+  display.print(oldPos.lastState);
 }
 
 void drawStep(){
+
+  // prints the jog step size on the right
   display.setTextColor(WHITE,BLACK);
   display.setCursor(85,25);
   display.print("S:");
   display.print(stepSize);
+
+
+  /// Print waiting status and the buffer size right of the position
+  ///  < okWait > : < buffer size > 
+  display.setCursor(85,33);
+  display.print(okWait);
+  
+  display.print(":");
+  
+  display.print(CMD_B);
+  
   
 }
 
@@ -724,7 +846,7 @@ void loop() {
   // get stuff from serial and assemble messages from grbl.
   readLine();
 
-  checkCtrlInputs();
+  //checkCtrlInputs();
 
   if (Serial.available()) {
     Serial2.write(Serial.read());
@@ -747,11 +869,15 @@ void loop() {
 
   if(lasttimer.repeat() ){
     calculate_velocity();
-    
+    checkCtrlInputs();  
     // TODO:  should only ask for status if the sender isn't polling
-    if((millis() - lastUpdate) > 1000 || !pass || !okWait){
-      Serial2.println("?");
-      CMD_B++;
+    // if the buffer is > 0 you should up date more quickly
+
+    if((millis() - lastUpdate) > 1000 && !pass && !okWait && CMD_B < (CMD_MAX + 1)){
+
+      // don't send new line with ? 
+      // new line returns "ok", raw ? does not
+      Serial2.print("?");
       lastUpdate = millis();
     }
     

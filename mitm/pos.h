@@ -33,7 +33,7 @@ static std::vector<char*> status;
 
 float px,py,pz;
 int pf1, pf2;
-char mystate[10];
+char mystate[255];
 int r = 0;
 
 void updatePos(char* cmd, PosSet &posSet){
