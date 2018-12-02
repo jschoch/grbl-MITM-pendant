@@ -49,7 +49,7 @@ mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
 bool newResp = false;
 bool newPush = false;
 bool newMsg = false;
-bool serial_dbg = true;
+bool serial_dbg = false;
 bool halted = false;
 bool disp_tick = false;
 uint8_t screen_tick = 0;
@@ -68,7 +68,7 @@ const uint8_t CMD_MAX = 5;
 
 // serial vars
 // globals for parsing Serial2 (grbl) command responses
-const unsigned int numChars = 512;
+const unsigned int numChars = 255;
 char cmd[numChars];   // an array to store the received data
 //static byte ndx = 0;
 static unsigned int ndx = 0;
@@ -78,9 +78,9 @@ char readch;
 
 // btns
 
-uint8_t btn1 = PB5;
+uint8_t btn1 = PB15;
 uint8_t btn2 = PB4;
-uint8_t btn3 = PB3;
+uint8_t btn3 = PA4;
 uint8_t btn4 = PA15;
 uint8_t btn5 = PB12;
 
@@ -180,7 +180,7 @@ void func_timer_2(){
       Zaxis.forward = true;
       Zaxis.decrPos();
   }else{
-      Xaxis.forward = false;
+      Zaxis.forward = false;
       Zaxis.incrPos();
   }    
 }
@@ -235,13 +235,14 @@ void config_timer(int channel, HardwareTimer this_timer, void (*func)()){
   this_timer.pause(); //stop... 
 
   // setMode(channel, mode)  mode 0 was crashing but it was not supposed to be used!?
-  this_timer.setMode(channel, TIMER_ENCODER); //set mode, the channel is not used when in this mode.
+  this_timer.setMode(channel, TIMER_ENCODER); //set mode, the channel is 1..4 but the docs say not to require it
   this_timer.setPrescaleFactor(1); //normal for encoder to have the lowest or no prescaler. 
   this_timer.setOverflow(PPR);    //use this to match the number of pulse per revolution of the encoder. Most industrial use 1024 single channel steps. 
   this_timer.setCount(0);          //reset the counter. 
   this_timer.setEdgeCounting(TIMER_SMCR_SMS_ENCODER3); //or TIMER_SMCR_SMS_ENCODER1 or TIMER_SMCR_SMS_ENCODER2. This uses both channels to count and ascertain direction. 
+  //this_timer.setEdgeCounting(TIMER_SMCR_SMS_ENCODER2);
   this_timer.refresh();
-  this_timer.attachInterrupt(0, func); //channel doesn't mean much here either.  
+  this_timer.attachInterrupt(TIMER_UPDATE_INTERRUPT, func); //first arg ends up as a timer_interrupt_id, see timer.h
   this_timer.resume();
 }
 
@@ -251,21 +252,17 @@ void readLine(){
   while (Serial2.available() > 0 && newMsg == false) {
         rc = Serial2.read();
 
-        if (rc > 0 && rc != endMarker) {
+        if (rc != endMarker) {
             cmd[ndx] = rc;
             ndx++;
-            cmd[ndx] = '\0';
             if (ndx >= numChars) {
-                Serial.print("moar");
-                ndx = numChars ;
+                ndx = numChars - 1;
             }
         }
         else {
-            //cmd[ndx] = '\0'; // terminate the string
-            Serial.print(ndx);
-            Serial.print("**********");
-            Serial.println(cmd);  
+            cmd[ndx] = '\0'; // terminate the string
             ndx = 0;
+  
             newMsg = true;
         }
     }
@@ -319,7 +316,7 @@ void processResp(){
    // must be an 'ok'
    else if(strcasestr(cmd,"ok") != NULL){
       if(CMD_B == 0){
-        //CMD_B = 0; 
+        CMD_B = 0; 
         okWait = false;
       }else{
         CMD_B--;
@@ -333,8 +330,7 @@ void processResp(){
         Serial.print(" ndx: ");
         Serial.println(ndx);
       }
-     _gs.d_status = "Halted: unknown command, hard reset to fix";
-     halt("Unknown Cmd");
+     //halt("Unknown Cmd");
    }
 
   if(serial_dbg){
@@ -361,16 +357,14 @@ void cancelJog(){
   // wait for IDLE
   while(strcmp(oldPos.lastState,"Idle") != 0){
     _gs.d_status = "Waiting for Idle";
-    Serial2.print("?");
+    Serial2.println("?");
     readLine();
     if(newMsg){
       
       parseMsg();
     } 
-    //delay(50);
-    if(mytimer.repeat()){
-      drawDisplay();
-    }
+    delay(50);
+    drawDisplay();
   }
 
   // make jogs small and let buffer clear per chamnit
@@ -454,8 +448,8 @@ void checkJogInputs(){
       if(serial_dbg){
         Serial.print(CMD_B);
         Serial.println(" waiting for buffer");
-        delay(100);
       }
+      //delay(10);
     }
 }
 
@@ -569,7 +563,7 @@ void parseMsg(){
       processPush();
      }
      else if(cmd[0] == '\n'){
-      Serial.println(" empty cmd");
+      Serial.write(" empty cmd");
      }
      // match resp
      else {
@@ -609,7 +603,8 @@ void loopPass(){
   if(newMsg){
     Serial.print(cmd);
     Serial.print("\n");
-    newMsg = false;
+    parseMsg();
+    //newMsg = false;
   }
   
 }
@@ -781,6 +776,8 @@ void setup() {
   pinMode(PA8, INPUT_PULLUP);
   pinMode(PA9, INPUT_PULLUP);
 
+  
+
   // buttons
 
   for (int i = 0; i < NUM_BUTTONS; i++) {
@@ -874,10 +871,8 @@ void loop() {
     // if the buffer is > 0 you should up date more quickly
 
     if((millis() - lastUpdate) > 1000 && !pass && !okWait && CMD_B < (CMD_MAX + 1)){
-
-      // don't send new line with ? 
-      // new line returns "ok", raw ? does not
-      Serial2.print("?");
+      Serial2.println("?");
+      CMD_B++;
       lastUpdate = millis();
     }
     
