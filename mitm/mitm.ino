@@ -50,6 +50,7 @@ bool newResp = false;
 bool newPush = false;
 bool newMsg = false;
 bool serial_dbg = false;
+bool serial_dbg2 = false;
 bool halted = false;
 bool disp_tick = false;
 uint8_t screen_tick = 0;
@@ -111,7 +112,7 @@ PosSet oldPos = {Pos(),Pos(),false};
 
 // timer for updating screen
 
-Neotimer mytimer = Neotimer(100);
+Neotimer mytimer = Neotimer(75);
 
 // timer for getting status
 
@@ -119,6 +120,21 @@ Neotimer lasttimer = Neotimer(50);
 
 
 // display stuff
+
+// change to i2c2
+
+#include <libmaple/i2c.h>
+
+//i2c_master_enable(i2c1,I2C_REMAP);
+
+//HardWire Wire(1,I2C_REMAP);
+
+/*
+TwoWire Wire2(PB11, PB10);
+
+#define Wire Wire2
+*/
+
 #define SSD1306_128_64
 #define OLED_RESET 4
 Adafruit_SSD1306 display(OLED_RESET);
@@ -153,7 +169,7 @@ float stepSize = 0.01;
 //
 
 
-int PPR = 2;
+int PPR = 4;
 
 HardwareTimer timer_1(1);
 
@@ -310,6 +326,15 @@ void dbgln(char* s){
 void processResp(){
   // look for error
   if(strcasestr(cmd, "error") != NULL){
+    _gs.d_status = "ERROR";
+    //delay(200);
+    //CMD_B--;
+    okWait = false;
+    
+    // TODO:  a pause with teh error may be ok
+    Serial.print("Error: ");
+    Serial.println(cmd);
+    //halt("error");
      dbg("Error found");
       dbgln(cmd);
      }
@@ -323,9 +348,11 @@ void processResp(){
       }
    }
    else{
-     dbg("Nothing matched:\n '");
-     dbg(cmd); 
-     dbg("'");
+  
+     Serial.print("[Nothing matched:\n ");
+     Serial.print(cmd); 
+     Serial.print("]"); 
+     //dbg("'");
      if(serial_dbg){
         Serial.print(" ndx: ");
         Serial.println(ndx);
@@ -350,6 +377,13 @@ void processPush(){
   
 }
 
+void processMsg(){
+  // Should check state here in case of Door ajar or something
+  Serial.print(cmd);
+  Serial.print("\n");
+  Serial2.print("?");
+}
+
 // this should halt everything and wait to confirm the jog has been canceled.
 void cancelJog(){
   doCancelJog();
@@ -357,7 +391,7 @@ void cancelJog(){
   // wait for IDLE
   while(strcmp(oldPos.lastState,"Idle") != 0){
     _gs.d_status = "Waiting for Idle";
-    Serial2.println("?");
+    Serial2.print("?");
     readLine();
     if(newMsg){
       
@@ -373,10 +407,12 @@ void cancelJog(){
 
 
 void doCancelJog(){
-  okWait = true;
+
+  //okWait = true;
   // TODO; update with header def
 
   dbgln("Issuing cancel");
+  _gs.d_cmd = "CANCEL";
   Serial2.flush();
   Serial2.write(CMD_JOG_CANCEL);
   Serial2.flush();
@@ -454,11 +490,14 @@ void checkJogInputs(){
 }
 
 void check_axis(Axis &axis){
+  // inc mode
   if(axis.moved() && inc_mode ){
     waitJog(axis);
     axis.resetPos();
   }
 
+
+  //  accel mode
   if(axis.vel == 0 && axis.running && !inc_mode){
     stepSize = 0.1;
     _gs.d_status = "JOG CANCEL";
@@ -474,6 +513,8 @@ void check_axis(Axis &axis){
     if (axis.vel < 100){
       stepSize = 0.05;
       batchJog(axis);
+
+      // set flag so we can check to see when the wheel stops and cancel motion
       axis.setRunning();
     }
     else if (axis.vel < 250){
@@ -558,8 +599,12 @@ void checkCtrlInputs(){
 // process messages from grbl
 void parseMsg(){
   if(newMsg){
+     // match message
+     if(cmd[0] == '['){
+        processMsg();
+      }
      // match push
-     if(cmd[0] == '[' || cmd[0] == '<'){
+     else if(cmd[0] == '<'){
       processPush();
      }
      else if(cmd[0] == '\n'){
@@ -651,7 +696,19 @@ void doJog(const char* start, Axis axis){
   Serial2.print((stepSize));
   Serial2.print("F");
   Serial2.println(feed);
+
+
+  // 
+  if(serial_dbg2){
+    Serial.print(axis.getOldPos());
+    Serial.print(",");
+    Serial.println(axis.getPos());
+  }
   if(serial_dbg){
+    Serial.print(axis.getOldPos());
+    Serial.print(",");
+    Serial.print(axis.getPos());
+    Serial.print(",");
     Serial.print(CMD_B);
     Serial.println(" Jog");
   }
@@ -870,7 +927,7 @@ void loop() {
     // TODO:  should only ask for status if the sender isn't polling
     // if the buffer is > 0 you should up date more quickly
 
-    if((millis() - lastUpdate) > 1000 && !pass && !okWait && CMD_B < (CMD_MAX + 1)){
+    if((millis() - lastUpdate) > 200 && !pass && !okWait && CMD_B < (CMD_MAX + 1)){
       Serial2.println("?");
       CMD_B++;
       lastUpdate = millis();
