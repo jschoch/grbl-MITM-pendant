@@ -42,9 +42,14 @@ mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
 #include "gstate.h"
 #include "pos.h"
 #include <Bounce2.h>
-#include "grbl.h"
+
+extern "C"{
+  #include "grbl.h"
+  #include "grbl_chat/grbl_chat.h"
+};
 
 // Vars
+
 
 bool newResp = false;
 bool newPush = false;
@@ -614,7 +619,9 @@ void parseMsg(){
      else {
       processResp();
      }
-
+  
+     // use other parser
+     parseData(cmd);
      newMsg = false;
   }else{
     // blink or something
@@ -726,6 +733,9 @@ void drawCMD(std::string &c){
   display.print("-");
   display.print(CMD_B);
   display.print(c.c_str());
+  display.print(" : ");
+  grbl_data_t *gD = getData();
+  display.print(gD->grbl.state);
   //display.print(" okWait: ");
   //display.print(okWait);
   display.setCursor(0,0);
