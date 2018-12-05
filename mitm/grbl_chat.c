@@ -92,6 +92,9 @@ grbl_data_t * setGrblReceiveCallback (void (*fn)(char *line))
     return &grbl_data;
 }
 
+bool getData2(){
+  return true;
+}
 grbl_data_t *getData(){
   return &grbl_data;
 }

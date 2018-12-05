@@ -617,7 +617,7 @@ void parseMsg(){
      }
   
      // use other parser
-     parseData(cmd);
+     //parseData(cmd);
      newMsg = false;
   }else{
     // blink or something
@@ -730,8 +730,11 @@ void drawCMD(std::string &c){
   display.print(CMD_B);
   display.print(c.c_str());
   display.print(" : ");
+
   grbl_data_t *gD = getData();
+  //bool bork = getData();
   display.print(gD->grbl.state);
+
   //display.print(" okWait: ");
   //display.print(okWait);
   display.setCursor(0,0);

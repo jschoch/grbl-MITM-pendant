@@ -125,6 +125,7 @@ bool grblParseState (char *state, grbl_t *grbl);
 void parseData(char *);
 //extern void parseData(char *);
 grbl_data_t * getData();
+//bool getData();
 
 
 #endif
