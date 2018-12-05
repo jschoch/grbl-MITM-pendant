@@ -47,6 +47,22 @@ mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
 // Vars
 
 
+const char* stateNames[] = {
+  "Unknown",
+    "Idle",
+    "Run",
+    "Jog",
+    "Hold:0",
+    "Hold:1",
+    "Alarm",
+    "Check",
+    "Door:0",
+    "Door:1",
+    "Door:2",
+    "Door:3",
+    "Tool"
+};
+
 bool newResp = false;
 bool newPush = false;
 bool newMsg = false;
@@ -617,7 +633,7 @@ void parseMsg(){
      }
   
      // use other parser
-     //parseData(cmd);
+     parseData(cmd);
      newMsg = false;
   }else{
     // blink or something
@@ -645,6 +661,7 @@ void loopJog(){
     }
   }
 }
+
 
 // watch for position updates and update gui
 void loopPass(){
@@ -731,9 +748,10 @@ void drawCMD(std::string &c){
   display.print(c.c_str());
   display.print(" : ");
 
-  grbl_data_t *gD = getData();
-  //bool bork = getData();
-  display.print(gD->grbl.state);
+  grbl_data_t *grbl_data = getData();
+  //display.print(gD->grbl.state);
+  display.print(grbl_data->grbl.state);
+  Serial.println(stateNames[grbl_data->grbl.state]);
 
   //display.print(" okWait: ");
   //display.print(okWait);
@@ -901,6 +919,9 @@ void setup() {
   if (serial_dbg){
     Serial.println("setup done");
   }
+
+  
+  //delay(15000);
 
 }
 

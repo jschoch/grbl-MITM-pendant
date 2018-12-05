@@ -1,4 +1,5 @@
-
+- [ ] move grbl_chat stuff to a src dir
+- [ ] fix parseFeedSpeed in grbl_chat.c
 - [ ] jeed a jogWait state.  Idle -> okWait -> Jogging -> Idle
 - [ ] do some testing of echo and job start job end, I believe this may be "Run" mode
 

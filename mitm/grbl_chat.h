@@ -35,6 +35,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define _GRBL_CHAT_H
 
 
+
 #include <stdbool.h>
 
 #include "grbl.h"

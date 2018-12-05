@@ -61,7 +61,9 @@ const char *const grblState[NUMSTATES] = {
 };
 
 
-static grbl_data_t grbl_data = {
+//extern grbl_data_t grbl_data;
+
+grbl_data_t grbl_data = {
     .changed          = 0xFF,
     .position         = {0.0f, 0.0f, 0.0f},
     .offset           = {0.0f, 0.0f, 0.0f},
@@ -180,22 +182,36 @@ static void parseFeedSpeed (char *data)
 {
     char *next;
 
+    /*
+    debugout ("parsefeed: ");
+    debugout(data);
     next = strchr(data, ',');
     *next++ = '\0';
+
+    debugout(data);
+
+    debugout(" parseDecimal: ");
 
     if(parseDecimal(&grbl_data.feed_rate, data))
         grbl_data.changed.feed = true;
 
+    debugout(" next");
     data = next;
     next = strchr(data, ',');
     *next++ = '\0';
+    
+    debugout("parseDecimal2: ");
 
     if(parseDecimal(&grbl_data.spindle.rpm_programmed, data))
         grbl_data.changed.rpm = true;
 
     if(parseDecimal(&grbl_data.spindle.rpm_actual, next))
         grbl_data.changed.rpm = true;
+
+    */
 }
+
+void debugout(const char *message);
 
 void parseData (char *block)
 {
@@ -205,9 +221,15 @@ void parseData (char *block)
     char *line = &buf[0];
 
     strcpy(line, block);
+    
+    //Serial.print(block);
+    //debugout("yAAAAAAAAAAAAA ");
+    //debugout(block);
+    //debugout("\n");
 
     if(line[0] == '<') {
 
+        //debugout("start '<' ");
         line = strtok(&line[1], "|");
 
         if(line) {
@@ -217,9 +239,10 @@ void parseData (char *block)
 
             line = strtok(NULL, "|");
         }
-
+        //debugout("start strtok");
         while(line) {
-
+            //debugout("\nline");
+            //debugout(line);
             if(!strncmp(line, "WPos:", 5)) {
                 if(!grbl_data.useWPos) {
                     grbl_data.useWPos = true;
@@ -234,8 +257,11 @@ void parseData (char *block)
                 }
                 parsePositions(line + 5);
 
-            } else if(!strncmp(line, "FS:", 3))
+            } else if(!strncmp(line, "FS:", 3)){
+                //debugout(" feed speed ");
                 parseFeedSpeed(line + 3);
+                //debugout(" done feed\n");
+                }
 
             else if(!strncmp(line, "WCO:", 4))
                 parseOffsets(line + 4);
@@ -252,6 +278,7 @@ void parseData (char *block)
                 grbl_data.coolant.mist = false;
                 grbl_data.changed.leds = true;
 
+                //debugout(" found a:\n");
                 while((c = *line++)) {
                     switch(c) {
 
@@ -341,6 +368,8 @@ void parseData (char *block)
         grbl_data.changed.msg = true;
     else if(!strncmp(line, "error:", 6) || !strncmp(line, "ALARM:", 6))
         grbl_data.changed.msg = true;
+
+    //debugout(" END\n\n");
 }
 
 
