@@ -42,11 +42,7 @@ mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
 #include "gstate.h"
 #include "pos.h"
 #include <Bounce2.h>
-
-extern "C"{
-  #include "grbl.h"
-  #include "grbl_chat/grbl_chat.h"
-};
+#include "gbbb.h"
 
 // Vars
 
