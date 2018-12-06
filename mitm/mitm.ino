@@ -8,12 +8,20 @@ WARNING:  I suck at c and c++.  It is a miracle this even works.  Use at your ow
 // Modes notes
 
 
-Jog Modes
+#Jog Modes
 
 mode 1 is jog queue mode.  In this mode the encoders will be set to a value and await a "go" button press.
-mode 2 is realtime jog mode.  this mode will jog and wait for "ok" status from the planner. subsequent encoder turns will queue the next jog.  A stop of encoder movement inside some debounce window will issue a jog stop.
+mode 2 is realtime jog mode.  
 
-setup/probe modes
+##Incremental Mode 
+
+Single stepSize increments.  Wheels will not take additional input until the target position has been reached and the grbl state is idle
+
+##Acceleration Mode
+
+this mode will issue jog commands while the encoder wheel keeps turning and the jog buffer isn't full.  The stepSize will increase with wheel velocity
+
+#setup/probe modes
 
 mode 3 is setup modes.  this mode is used to set virtual stops
 
@@ -42,7 +50,9 @@ mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
 #include "gstate.h"
 #include "pos.h"
 #include <Bounce2.h>
-#include "gbbb.h"
+#include "myenums.h"
+//#include "./gbbb.h"
+#include <grbl_chat.h>
 
 // Vars
 
@@ -65,6 +75,11 @@ const char* stateNames[] = {
 
 //grbl_data_t *grbl_data;
 
+uint8_t mstate = Setup;
+uint8_t old_mstate = Setup;
+uint8_t last_mstate = Setup;
+uint8_t old_grbl_state = Unknown;
+
 bool newResp = false;
 bool newPush = false;
 bool newMsg = false;
@@ -73,6 +88,8 @@ bool serial_dbg2 = true;
 bool halted = false;
 bool disp_tick = false;
 uint8_t screen_tick = 0;
+
+const char* halt_msg;
 
 // wait for buffer to clear
 bool okWait = false;
@@ -130,9 +147,21 @@ Gstate _gs;
 
 PosSet oldPos = {Pos(),Pos(),false};
 
+Neotimer btntimer = Neotimer(35);
+
 // timer for updating screen
 
+Neotimer displaytimer = Neotimer(75);
+
+Neotimer incjogstarttimeout = Neotimer(500);
+
 Neotimer mytimer = Neotimer(75);
+
+
+// timer for getting updates via "?"
+
+Neotimer updatetimer = Neotimer(25);
+
 
 // timer for getting status
 
@@ -141,13 +170,15 @@ Neotimer lasttimer = Neotimer(50);
 
 // display stuff
 
+/* no need to change i2c2 now
 // change to i2c2
 
-#include <libmaple/i2c.h>
+//#include <libmaple/i2c.h>
 
 //i2c_master_enable(i2c1,I2C_REMAP);
 
 //HardWire Wire(1,I2C_REMAP);
+*/
 
 /*
 TwoWire Wire2(PB11, PB10);
@@ -299,37 +330,16 @@ void readLine(){
             cmd[ndx] = '\0'; // terminate the string
             ndx = 0;
   
-            newMsg = true;
+            //newMsg = true;
+
+
+            parseData(cmd);
+            //grbl_data_t *grbl_data = getData();
+            //mstate = 
         }
     }
 }
 
-void readLine2() {
-  while(Serial2.available() > 0 && newMsg == false){
-    doReadLine();
-  }
-}
-
-void doReadLine(){
-    static int pos = 0;
-    int rpos;
-    readch = Serial2.read();
-    if (readch > 0) {
-        switch (readch) {
-            //case '\r': // Ignore CR
-                //break;
-            case '\n': // Return on new-line
-                rpos = pos;
-                pos = 0;  // Reset position index ready for next time
-                newMsg = true;
-            default:
-                if (pos < numChars -2) {
-                    cmd[pos++] = readch;
-                    cmd[pos] = 0;
-                }
-        }
-    }
-}
 
 void dbg(char* s){
   if(serial_dbg){
@@ -342,121 +352,6 @@ void dbgln(char* s){
   }
 }
 
-/* Depricated due to trying to process ok or error.  
-// process an 'ok' or 'error'
-void processResp(){
-  // look for error
-  if(strcasestr(cmd, "error") != NULL){
-    _gs.d_status = "ERROR";
-    //delay(200);
-    //CMD_B--;
-    okWait = false;
-    
-    // TODO:  a pause with teh error may be ok
-    Serial.print("Error: ");
-    Serial.println(cmd);
-    //halt("error");
-     dbg("Error found");
-      dbgln(cmd);
-     }
-   // must be an 'ok'
-   else if(strcasestr(cmd,"ok") != NULL){
-      if(CMD_B == 0){
-        CMD_B = 0; 
-        okWait = false;
-      }else{
-        CMD_B--;
-      }
-   }
-   else{
-  
-     Serial.print("[Nothing matched:\n ");
-     Serial.print(cmd); 
-     Serial.print("]"); 
-     //dbg("'");
-     if(serial_dbg){
-        Serial.print(" ndx: ");
-        Serial.println(ndx);
-      }
-     //halt("Unknown Cmd");
-   }
-
-  if(serial_dbg){
-    Serial.print("-----> ");
-    Serial.print(cmd);
-    Serial.print("\n");
-  }
-}
-*/
-
-void processResp(){
-
-  if(CMD_B == 0){
-        CMD_B = 0;
-        okWait = false;
-        //_gs.d_status = "Jog Wait for Idle";
-      }else{
-        CMD_B--;
-      }
-  
-  }
-
-// process msg starting with [ or <
-void processPush(){
-  //updatePos(cmd,oldPos);
-  if(serial_dbg){
-    Serial.print(cmd);
-    Serial.print("\n");
-  }
-  
-}
-
-void processMsg(){
-  // Should check state here in case of Door ajar or something
-  Serial.print(cmd);
-  Serial.print("\n");
-  Serial2.print("?");
-}
-
-// this should halt everything and wait to confirm the jog has been canceled.
-void cancelJog(){
-  grbl_data_t *grbl_data = getData(); 
-  doCancelJog();
-
-  // wait for IDLE
-  //while(strcmp(oldPos.lastState,"Idle") != 0){
-  while(grbl_data->grbl.state != 1){ // wait for Idle state
-    _gs.d_status = "Waiting for Idle";
-    Serial2.print("?");
-    readLine();
-    if(newMsg){
-      
-      parseMsg();
-    } 
-    delay(50);
-    drawDisplay();
-  }
-
-  // make jogs small and let buffer clear per chamnit
-  //doCancelJog();
-}
-
-
-void doCancelJog(){
-
-  //okWait = true;
-  // TODO; update with header def
-
-  dbgln("Issuing cancel");
-  _gs.d_cmd = "CANCEL";
-  Serial2.flush();
-  Serial2.write(CMD_JOG_CANCEL);
-  Serial2.flush();
-
-  //dbgln("issuing G4P0");
-  //Serial2.println("G4P0");
-  //Serial2.flush();
-}
 
 void updateStepSize(){
   if(stepCnt <= 1){
@@ -496,98 +391,57 @@ bool bufferFull(){
   }
 }
 
-void checkJogInputs(){
-  //  mock for encoder handling
-  checkBtns();
-  if(buttons[3].rose()){
-    batchJog("$J=G91 ", Xaxis);
-    batchJog("$J=G91 ", Xaxis);
-    batchJog("$J=G91 ", Xaxis);
-    batchJog("$J=G91 ", Xaxis);
-    batchJog("$J=G91 ", Xaxis);
-    batchJog("$J=G91 ", Xaxis);
-    batchJog("$J=G91 ", Xaxis);
-    _gs.d_status = "batch";
-  }
 
-  //  Encoder inputs
-  if(!pass && (CMD_B <= CMD_MAX)){
-    check_axis(Yaxis);
-    check_axis(Xaxis);
-    check_axis(Zaxis);
-    }
-  else if(!pass && CMD_B > CMD_MAX){
-      if(serial_dbg){
-        Serial.print(CMD_B);
-        Serial.println(" waiting for buffer");
-      }
-      //delay(10);
-    }
+
+void inc_check_encoders(){
+  inc_check_axis(Yaxis);
+  inc_check_axis(Xaxis);
+  inc_check_axis(Zaxis);
 }
 
-void check_axis(Axis &axis){
-  // inc mode
-  if(axis.moved() && inc_mode && !jogWait){
+void inc_reset_pos(){
+  Yaxis.resetPos();
+  Zaxis.resetPos();
+  Xaxis.resetPos();
+}
+
+void inc_check_axis(Axis &axis){
+  if(axis.moved() && mstate == IncModeWait )
+    {
     waitJog(axis);
+    old_mstate = mstate;
+    mstate = IncJogStart;
+    incjogstarttimeout.start();
     axis.resetPos();
   }
-
-
-  //  accel mode
-  if(axis.vel == 0 && axis.running && !inc_mode){
-    stepSize = 0.1;
-    _gs.d_status = "JOG CANCEL";
-    axis.notRunning();
-    cancelJog();
-  }
-
-  if(axis.vel != 0 && axis.moved() && !inc_mode){
-    if(serial_dbg){
-      Serial.print("velocity: ");
-      Serial.print(axis.vel);
-    }
-    if (axis.vel < 100){
-      stepSize = 0.05;
-      batchJog(axis);
-
-      // set flag so we can check to see when the wheel stops and cancel motion
-      axis.setRunning();
-    }
-    else if (axis.vel < 250){
-      stepSize = 0.1;
-      batchJog(axis);
-      axis.setRunning();
-    }
-    else if (axis.vel < 400){
-      stepSize = 0.5;
-      batchJog(axis);
-      axis.setRunning();
-    }
-    else if (axis.vel >= 600){
-      // max overshoot is stepSize * CMD_MAX, 2.5mm
-      stepSize = 1.0;
-      batchJog(axis);
-      axis.setRunning();
-    }
-    axis.resetPos();  
-  }
 }
-
-
 
 void checkBtns(){
   for (int i = 0; i < NUM_BUTTONS; i++)  {
     // Update the Bounce instance :
     buttons[i].update();
     }
+
+   if(buttons[PASS_TOGGLE].read()){
+    pass = false;
+    if (inc_mode){
+      current_mode = "Step Jog ";
+      }else{
+      current_mode = "Speed Jog";
+    }
+
+  }else{
+    pass = true;
+  }
 }
 
+/*
 void checkCtrlInputs(){
   // check buttons
   checkBtns();
 
   // checks buttons and any other non-jog inputs
-  if(buttons[0].read()){
+  if(buttons[PASS_TOGGLE].read()){
     pass = false;
     if (inc_mode){
       current_mode = "Step Jog ";
@@ -596,16 +450,15 @@ void checkCtrlInputs(){
     }
     
   }else{
-    current_mode = "Passive";
     pass = true;
   }
   
-  if(buttons[1].rose()){
+  if(buttons[STEP_INC].rose()){
     stepCnt++;
   }
   
 
-  if(buttons[2].rose()){
+  if(buttons[INC_TOGGLE].rose()){
       inc_mode = !inc_mode;
       if(inc_mode){
         
@@ -616,46 +469,27 @@ void checkCtrlInputs(){
       }
   }
 
-  /*
-  if(buttons[3].rose()){
-    //  TODO: using this button to mock a jog command, revert to $X
-     //  send unlock
+  if(buttons[CLEAR_ALARM].rose()){
+      //TODO: using this button to mock a jog command, revert to $X
+    //  send unlock
      Serial2.println("$X");
-    //
+    
   }
-  */
   
-  if(buttons[4].rose()){
+  if(buttons[JOG_CANCEL].rose()){
      //  TODO:  add stop jog command here
-     cancelJog();
+     //cancelJog();
   }
   updateStepSize();
 }
 
+*/
+
 // process messages from grbl
 void parseMsg(){
   if(newMsg){
-     /*  new parser should handle these
-
-     // match message
-     if(cmd[0] == '['){
-        processMsg();
-      }
-     // match push
-     else if(cmd[0] == '<'){
-      processPush();
-     }
-     else if(cmd[0] == '\n'){
-      Serial.write(" empty cmd");
-     }
-     // match resp
-     else {
-      processResp();
-     }
-     */
-  
      if(cmd[0] == 'o' && cmd[1] == 'k'){ // == "ok"
-        processResp();
+        //processResp();
      } else{
       parseData(cmd);
       }
@@ -664,62 +498,17 @@ void parseMsg(){
        Serial.print(cmd);
        Serial.println("");
        } 
-     checkJogIdle();
+     //checkJogIdle();
   }else{
     // blink or something
   }
 }
 
 
-// if the jog has been ack'ed check for idle.  if idle remove jogwait flag
-void checkJogIdle(){
-  grbl_data_t *grbl_data = getData();
-  if(jogWait && !okWait){
-    if(grbl_data->grbl.state == 1){
-      jogWait = false;
-      _gs.d_status = "Wait for jog";
-    }else {
-      _gs.d_status = "wait for jog idle";
-    }
-  }
-}
-
-// Process any inputs to jog and ensure the commands are completing 
-void loopJog(){
-  parseMsg();
-
-  // Ensure no new commands are issued while waiting for buffer to clear.
-  if(okWait && CMD_B > 0){
-    // TODO:  update status msg here.
-    _gs.d_status = "S:okWait";
-  }
-  //
-  else{
-    checkJogInputs();
-    if(bufferFull()){
-      _gs.d_status = "Buff Full"; 
-      
-    }else{
-      //checkJogInputs();
-      //_gs.d_status = "Waiting for jog";
-    }
-  }
-}
-
-
-// watch for position updates and update gui
-void loopPass(){
-  if(newMsg){
-    Serial.print(cmd);
-    Serial.print("\n");
-    parseMsg();
-    //newMsg = false;
-  }
-  
-}
 
 void halt(char * msg){
   halted = true;
+  mstate = Halt;
   // TODO: update display;
 }
 
@@ -740,16 +529,15 @@ void waitJog(Axis axis){
   waitJog("$J=G91 ", axis);
 }
 
+void requestUpdate(){
+  Serial2.print("?");
+}
+
 void waitJog(const char* start, Axis axis){
   if(!bufferFull() && !jogWait){
-    grbl_data_t *grbl_data = getData();
-    //grbl_data->grbl.state = 3;
-    okWait = true;
-    jogWait = true;
     doJog(start,axis);
     CMD_B++;
-    Serial2.print("?");
-    //delay(10);
+    requestUpdate();
   }
 }
 
@@ -804,7 +592,7 @@ void drawCMD(std::string &c){
   grbl_data_t *grbl_data = getData();
   //display.print(gD->grbl.state);
   display.print(stateNames[grbl_data->grbl.state]);
-  Serial.println(stateNames[grbl_data->grbl.state]);
+  //Serial.println(stateNames[grbl_data->grbl.state]);
 
   //display.print(" okWait: ");
   //display.print(okWait);
@@ -828,7 +616,7 @@ void drawStatus(std::string &c){
   //display.print();
 }
 
-void drawPOS(float x, float y, float z){
+void drawPOS(){
   grbl_data_t *grbl_data = getData();
   display.setTextColor(WHITE, BLACK);
   display.setCursor(0,16);
@@ -850,11 +638,8 @@ void drawMode(){
 
   display.setTextColor(WHITE,BLACK);
   display.setCursor(0,0);
-  if(inc_mode){
-    display.print("i");
-  }else{
-    display.print("a");
-  }
+  display.print(mstate);
+  display.print("#");
   display.print(current_mode.c_str());
   //display.print(" | ");
   //display.print(oldPos.lastState);
@@ -885,12 +670,11 @@ void drawStep(){
 }
 
 void drawDisplay(){
-  if(mytimer.repeat()){
+  if(displaytimer.repeat()){
     display.clearDisplay();
-    //display.print(".");
     drawCMD(_gs.d_cmd);
     drawStatus(_gs.d_status);
-    drawPOS(0.0,0.0,0.0);
+    drawPOS();
     drawMode();
     drawStep();
     display.display();
@@ -982,54 +766,114 @@ void setup() {
 
   //grbl_data_t * grlb_data = getData(); 
   //delay(15000);
-
+  mstate = SetupDone;
 } // end setup
+
+
+/////////////////////////////////////////////////////// Loop
 
 void loop() {
   
   // get stuff from serial and assemble messages from grbl.
   readLine();
 
-  //checkCtrlInputs();
-
   if (Serial.available()) {
     Serial2.write(Serial.read());
   }
   
-  // passive mode passes messages through from GUI.
-  // passive mode ignores commands but updates position data 
-  if(pass){
-    loopPass();
-  }else{
-    // Jog mode tracks commands and responses
-    loopJog();
-  }
-
-  // 
-
   drawDisplay();
 
-  // pos updater
+  if(updatetimer.repeat() && mstate != AccelModeRun){
+    requestUpdate(); 
+  }
 
-  if(lasttimer.repeat() ){
-    calculate_velocity();
-    checkCtrlInputs();  
-    // TODO:  should only ask for status if the sender isn't polling
-    // if the buffer is > 0 you should up date more quickly
 
-    if((millis() - lastUpdate) > 200 && !pass && !okWait && CMD_B < (CMD_MAX + 1)){
-      Serial2.println("?");
-      CMD_B++;
-      lastUpdate = millis();
+
+
+  if(btntimer.repeat()){
+    checkBtns();
+  }
+  grbl_data_t *grbl_data = getData();
+  switch(mstate){
+      case SetupDone:
+        if(pass){
+          mstate = Passive;
+        }else{
+          mstate = IncModeWait;
+        }  
+        break;
+      case Passive:
+        if(pass == false){
+          old_mstate = mstate;
+          mstate = IncModeWait;
+        }
+        break;
+      case IncModeWait:
+        if(pass){
+          old_mstate = mstate;
+          mstate = Passive;
+        }else{
+          // check encoders, if they move they will transition to IncJogStart
+          inc_check_encoders();
+        }
+        break;
+      /* 
+      case AccelModeWait:
+        break;
+      case AccelModeTurning: 
+        break;
+      case AccelModeStop:
+        break;
+      */
+      case IncJogStart: 
+        if(grbl_data->grbl.state == Jog){
+          old_mstate = mstate;
+          mstate = IncJogRun;
+        }else{
+          _gs.d_status = "Waiting for Jog Start";
+        }
+        if (incjogstarttimeout.done()){
+          dbgln("IncJogStart timedout!");
+          old_mstate = mstate;
+          mstate = IncModeWait;
+        }
+        break;
+      case IncJogRun:
+        if(grbl_data->grbl.state == Idle){
+          old_mstate = mstate;
+          mstate = IncModeWait;
+          CMD_B--;
+          // capture current position on encoders.  this is used to detect a move.
+          inc_reset_pos();
+        }else{
+          _gs.d_status = "Waiting for Jog Stop";
+        }
+        break;
+      case IncJogEnd:
+        break;
+      case Halt:
+        break;
+
+  
+      default: 
+        halt_msg = "Unknown state";
+        halted = true;
+        break;
     }
-    
-    digitalWrite(PC13, (!digitalRead(PC13)));
-    
-  }
 
-  // TODO: consider key combo to unhalt
-  while(halted){
-    dbgln("HALT");
-    delay(1000);
-  }
+    if(grbl_data->grbl.state != old_grbl_state){
+      Serial.print("New State: ");
+      Serial.println(grbl_data->grbl.state);
+      old_grbl_state = grbl_data->grbl.state;
+    }
+
+    if (last_mstate != mstate){
+      if (serial_dbg){
+        Serial.print(" New MState: ");
+        Serial.print(old_mstate);
+        Serial.print(",");
+        Serial.println(mstate);
+      }
+      last_mstate = mstate;
+    }
 }
