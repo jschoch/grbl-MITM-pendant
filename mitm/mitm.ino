@@ -63,17 +63,20 @@ const char* stateNames[] = {
     "Tool"
 };
 
+//grbl_data_t *grbl_data;
+
 bool newResp = false;
 bool newPush = false;
 bool newMsg = false;
-bool serial_dbg = false;
-bool serial_dbg2 = false;
+bool serial_dbg = true;
+bool serial_dbg2 = true;
 bool halted = false;
 bool disp_tick = false;
 uint8_t screen_tick = 0;
 
 // wait for buffer to clear
 bool okWait = false;
+bool jogWait = false;
 
 // flag for passive mode;
 bool pass = false;
@@ -175,7 +178,7 @@ int feedZ = 1000;
 int feed = 1000;
 int rapid = 2000;
 int rapidXY = 2000;
-float stepSize = 0.01;
+float stepSize = 10.01;
 
 //  STM32 encoder stuff
 
@@ -339,6 +342,7 @@ void dbgln(char* s){
   }
 }
 
+/* Depricated due to trying to process ok or error.  
 // process an 'ok' or 'error'
 void processResp(){
   // look for error
@@ -383,10 +387,23 @@ void processResp(){
     Serial.print("\n");
   }
 }
+*/
+
+void processResp(){
+
+  if(CMD_B == 0){
+        CMD_B = 0;
+        okWait = false;
+        //_gs.d_status = "Jog Wait for Idle";
+      }else{
+        CMD_B--;
+      }
+  
+  }
 
 // process msg starting with [ or <
 void processPush(){
-  updatePos(cmd,oldPos);
+  //updatePos(cmd,oldPos);
   if(serial_dbg){
     Serial.print(cmd);
     Serial.print("\n");
@@ -403,10 +420,12 @@ void processMsg(){
 
 // this should halt everything and wait to confirm the jog has been canceled.
 void cancelJog(){
+  grbl_data_t *grbl_data = getData(); 
   doCancelJog();
 
   // wait for IDLE
-  while(strcmp(oldPos.lastState,"Idle") != 0){
+  //while(strcmp(oldPos.lastState,"Idle") != 0){
+  while(grbl_data->grbl.state != 1){ // wait for Idle state
     _gs.d_status = "Waiting for Idle";
     Serial2.print("?");
     readLine();
@@ -508,7 +527,7 @@ void checkJogInputs(){
 
 void check_axis(Axis &axis){
   // inc mode
-  if(axis.moved() && inc_mode ){
+  if(axis.moved() && inc_mode && !jogWait){
     waitJog(axis);
     axis.resetPos();
   }
@@ -616,6 +635,8 @@ void checkCtrlInputs(){
 // process messages from grbl
 void parseMsg(){
   if(newMsg){
+     /*  new parser should handle these
+
      // match message
      if(cmd[0] == '['){
         processMsg();
@@ -631,12 +652,35 @@ void parseMsg(){
      else {
       processResp();
      }
+     */
   
-     // use other parser
-     parseData(cmd);
+     if(cmd[0] == 'o' && cmd[1] == 'k'){ // == "ok"
+        processResp();
+     } else{
+      parseData(cmd);
+      }
      newMsg = false;
+     if(serial_dbg){
+       Serial.print(cmd);
+       Serial.println("");
+       } 
+     checkJogIdle();
   }else{
     // blink or something
+  }
+}
+
+
+// if the jog has been ack'ed check for idle.  if idle remove jogwait flag
+void checkJogIdle(){
+  grbl_data_t *grbl_data = getData();
+  if(jogWait && !okWait){
+    if(grbl_data->grbl.state == 1){
+      jogWait = false;
+      _gs.d_status = "Wait for jog";
+    }else {
+      _gs.d_status = "wait for jog idle";
+    }
   }
 }
 
@@ -657,7 +701,7 @@ void loopJog(){
       
     }else{
       //checkJogInputs();
-      _gs.d_status = "Waiting for jog";
+      //_gs.d_status = "Waiting for jog";
     }
   }
 }
@@ -697,10 +741,15 @@ void waitJog(Axis axis){
 }
 
 void waitJog(const char* start, Axis axis){
-  if(!bufferFull()){
+  if(!bufferFull() && !jogWait){
+    grbl_data_t *grbl_data = getData();
+    //grbl_data->grbl.state = 3;
     okWait = true;
+    jogWait = true;
     doJog(start,axis);
     CMD_B++;
+    Serial2.print("?");
+    //delay(10);
   }
 }
 
@@ -725,6 +774,10 @@ void doJog(const char* start, Axis axis){
     Serial.println(axis.getPos());
   }
   if(serial_dbg){
+    Serial.print(okWait);
+    Serial.print(",");
+    Serial.print(jogWait);
+    Serial.print(":");
     Serial.print(axis.getOldPos());
     Serial.print(",");
     Serial.print(axis.getPos());
@@ -750,7 +803,7 @@ void drawCMD(std::string &c){
 
   grbl_data_t *grbl_data = getData();
   //display.print(gD->grbl.state);
-  display.print(grbl_data->grbl.state);
+  display.print(stateNames[grbl_data->grbl.state]);
   Serial.println(stateNames[grbl_data->grbl.state]);
 
   //display.print(" okWait: ");
@@ -776,17 +829,21 @@ void drawStatus(std::string &c){
 }
 
 void drawPOS(float x, float y, float z){
+  grbl_data_t *grbl_data = getData();
   display.setTextColor(WHITE, BLACK);
   display.setCursor(0,16);
   if(Xaxis.running){
     display.print("-");
   }
   display.print("X: ");
-  display.println(oldPos.mpos.x);
+  //display.println(oldPos.mpos.x);
+  display.println(grbl_data->position[X_AXIS]);
   display.print("Y: ");
-  display.println(oldPos.mpos.y);
+  //display.println(oldPos.mpos.y);
+  display.println(grbl_data->position[Y_AXIS]);
   display.print("Z: ");
-  display.println(oldPos.mpos.z);
+  //display.println(oldPos.mpos.z);
+  display.println(grbl_data->position[Z_AXIS]);
 }
 
 void drawMode(){
@@ -799,8 +856,8 @@ void drawMode(){
     display.print("a");
   }
   display.print(current_mode.c_str());
-  display.print(" | ");
-  display.print(oldPos.lastState);
+  //display.print(" | ");
+  //display.print(oldPos.lastState);
 }
 
 void drawStep(){
@@ -820,6 +877,9 @@ void drawStep(){
   display.print(":");
   
   display.print(CMD_B);
+  display.print(":");
+
+  display.print(jogWait);
   
   
 }
@@ -920,10 +980,10 @@ void setup() {
     Serial.println("setup done");
   }
 
-  
+  //grbl_data_t * grlb_data = getData(); 
   //delay(15000);
 
-}
+} // end setup
 
 void loop() {
   
