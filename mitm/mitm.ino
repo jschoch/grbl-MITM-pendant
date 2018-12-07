@@ -417,9 +417,10 @@ void accel_check_encoders(){
 }
 void calculate_velocity(){
   if(veltimer.repeat()){
-    static long a = Xaxis.velocity();
-    static long b = Yaxis.velocity();
-    static long c = Zaxis.velocity();
+    long a = Xaxis.velocity2();
+    long b = Yaxis.velocity2();
+    long c = Zaxis.velocity2();
+
     if(serial_dbg2){
       Serial.print(a);
       Serial.print(",");
@@ -444,7 +445,7 @@ void accel_check_axis(Axis &axis){
 
   if(axis.moved() && (mstate == AccelModeWait || mstate == AccelModeRun) && !bufferFull()  && acceltimer.repeat())
     {
-    stepSize = map((long)axis.vel,0.0, 1200.0, 0.01, 1.5);
+    stepSize = map((long)axis.vel,0.0, 8000.0, 0.01, 1.5);
     if(stepSize > 0){
       batchJog(axis);
       old_mstate = mstate;

@@ -1,4 +1,5 @@
 #include "HardwareTimer.h"
+#include "Arduino.h"
 
 class Axis {
     
@@ -76,15 +77,16 @@ class Axis {
     void notRunning(){
       running = false;
     }
-    long velocity(){
+    long velocity2(){
       newtime = millis();
-      vel = abs(pos - vel_old_pos) * 100000 / (newtime - oldtime);
+      vel = abs(pos - vel_old_pos) * 10000 / (newtime - oldtime);
 
-
+      /*
       Serial.print("pos: ");
       Serial.print(pos);   
       Serial.print (" speed = ");
       Serial.println (vel);
+      */
 
       oldtime = newtime;
       vel_old_pos = pos;
