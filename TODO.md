@@ -1,4 +1,4 @@
-- [ ] Add back button parsing for stepSize
+- [ ] Add back button parsing for stepSize, next get state start working with AccelModeWait
 - [ ] do some testing of echo and job start job end, I believe this may be "Run" mode
 - [X ] move grbl_chat stuff to a src dir
 - [X ] fix parseFeedSpeed in grbl_chat.c

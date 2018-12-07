@@ -57,23 +57,6 @@ mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
 // Vars
 
 
-const char* stateNames[] = {
-  "Unknown",
-    "Idle",
-    "Run",
-    "Jog",
-    "Hold:0",
-    "Hold:1",
-    "Alarm",
-    "Check",
-    "Door:0",
-    "Door:1",
-    "Door:2",
-    "Door:3",
-    "Tool"
-};
-
-//grbl_data_t *grbl_data;
 
 uint8_t mstate = Setup;
 uint8_t old_mstate = Setup;
@@ -87,6 +70,7 @@ bool serial_dbg = true;
 bool serial_dbg2 = true;
 bool halted = false;
 bool disp_tick = false;
+bool gotAccelOk = false;
 uint8_t screen_tick = 0;
 
 const char* halt_msg;
@@ -96,7 +80,7 @@ bool okWait = false;
 bool jogWait = false;
 
 // flag for passive mode;
-bool pass = false;
+bool pass = true;
 
 // buffer control
 
@@ -133,7 +117,7 @@ uint8_t stepCnt = 3;
 
 // inc_mode moves one stepSize.  inc_mode false activates acceleration mode.
 // acceleration mode attempts to queue moves and to stop motion when the velocity of the wheel is zero.
-bool inc_mode = true;
+bool inc_mode = false;
 
 // update timer thing
 
@@ -156,6 +140,10 @@ Neotimer displaytimer = Neotimer(75);
 Neotimer incjogstarttimeout = Neotimer(500);
 
 Neotimer mytimer = Neotimer(75);
+
+
+// limit batch jogs by time
+Neotimer acceltimer = Neotimer(150);
 
 
 // timer for getting updates via "?"
@@ -209,7 +197,7 @@ int feedZ = 1000;
 int feed = 1000;
 int rapid = 2000;
 int rapidXY = 2000;
-float stepSize = 10.01;
+float stepSize = 0.5;
 
 //  STM32 encoder stuff
 
@@ -319,6 +307,12 @@ void readLine(){
   while (Serial2.available() > 0 && newMsg == false) {
         rc = Serial2.read();
 
+        // TODO need to mute this when connected to the sender
+        if(serial_dbg){
+
+          //Serial.write(rc);
+
+        }
         if (rc != endMarker) {
             cmd[ndx] = rc;
             ndx++;
@@ -330,16 +324,21 @@ void readLine(){
             cmd[ndx] = '\0'; // terminate the string
             ndx = 0;
   
-            //newMsg = true;
-
+            checkOk();
 
             parseData(cmd);
-            //grbl_data_t *grbl_data = getData();
-            //mstate = 
         }
     }
 }
 
+
+void checkOk(){
+  if(cmd[0] == 'o' && cmd[1] == 'k'){
+    if(mstate == AccelModeRun){
+      CMD_B--;
+      }
+    }
+}
 
 void dbg(char* s){
   if(serial_dbg){
@@ -399,7 +398,9 @@ void inc_check_encoders(){
   inc_check_axis(Zaxis);
 }
 
-void inc_reset_pos(){
+
+
+void reset_pos(){
   Yaxis.resetPos();
   Zaxis.resetPos();
   Xaxis.resetPos();
@@ -416,6 +417,23 @@ void inc_check_axis(Axis &axis){
   }
 }
 
+void accel_check_encoders(){
+  accel_check_axis(Yaxis);
+  accel_check_axis(Xaxis);
+  accel_check_axis(Zaxis);
+}
+
+void accel_check_axis(Axis &axis){
+  if(axis.moved() && (mstate == AccelModeWait || mstate == AccelModeRun) && !bufferFull()  && acceltimer.repeat())
+    {
+    batchJog(axis);
+    old_mstate = mstate;
+    mstate = AccelModeRun;
+
+    //axis.resetPos();
+  }
+}
+
 void checkBtns(){
   for (int i = 0; i < NUM_BUTTONS; i++)  {
     // Update the Bounce instance :
@@ -423,15 +441,9 @@ void checkBtns(){
     }
 
    if(buttons[PASS_TOGGLE].read()){
-    pass = false;
-    if (inc_mode){
-      current_mode = "Step Jog ";
-      }else{
-      current_mode = "Speed Jog";
-    }
-
-  }else{
-    pass = true;
+     pass = false;
+   }else{
+     pass = true;
   }
   
   if(buttons[STEP_INC].rose()){
@@ -463,76 +475,6 @@ void checkBtns(){
      //cancelJog();
   }
 }
-
-/*
-void checkCtrlInputs(){
-  // check buttons
-  checkBtns();
-
-  // checks buttons and any other non-jog inputs
-  if(buttons[PASS_TOGGLE].read()){
-    pass = false;
-    if (inc_mode){
-      current_mode = "Step Jog ";
-      }else{
-      current_mode = "Speed Jog"; 
-    }
-    
-  }else{
-    pass = true;
-  }
-  
-  if(buttons[STEP_INC].rose()){
-    stepCnt++;
-  }
-  
-
-  if(buttons[INC_TOGGLE].rose()){
-      inc_mode = !inc_mode;
-      if(inc_mode){
-        
-      }else{
-        // reset states
-        CMD_B = 0; 
-        okWait = 0;
-      }
-  }
-
-  if(buttons[CLEAR_ALARM].rose()){
-      //TODO: using this button to mock a jog command, revert to $X
-    //  send unlock
-     Serial2.println("$X");
-    
-  }
-  
-  if(buttons[JOG_CANCEL].rose()){
-     //  TODO:  add stop jog command here
-     //cancelJog();
-  }
-  updateStepSize();
-}
-
-*/
-
-// process messages from grbl
-void parseMsg(){
-  if(newMsg){
-     if(cmd[0] == 'o' && cmd[1] == 'k'){ // == "ok"
-        //processResp();
-     } else{
-      parseData(cmd);
-      }
-     newMsg = false;
-     if(serial_dbg){
-       Serial.print(cmd);
-       Serial.println("");
-       } 
-     //checkJogIdle();
-  }else{
-    // blink or something
-  }
-}
-
 
 
 void halt(char * msg){
@@ -667,7 +609,7 @@ void drawMode(){
 
   display.setTextColor(WHITE,BLACK);
   display.setCursor(0,0);
-  display.print(mstate);
+  display.print(cStateNames[mstate]);
   display.print("#");
   display.print(current_mode.c_str());
   //display.print(" | ");
@@ -812,7 +754,8 @@ void loop() {
   
   drawDisplay();
 
-  if(updatetimer.repeat() && mstate != AccelModeRun){
+  //if(updatetimer.repeat() && mstate != AccelModeRun){
+  if(updatetimer.repeat()){
     requestUpdate(); 
   }
 
@@ -828,13 +771,15 @@ void loop() {
         if(pass){
           mstate = Passive;
         }else{
-          mstate = IncModeWait;
+          //mstate = IncModeWait;
+          mstate = AccelModeWait;
         }  
         break;
       case Passive:
         if(pass == false){
           old_mstate = mstate;
-          mstate = IncModeWait;
+          //mstate = IncModeWait;
+           mstate = AccelModeWait;
         }
         break;
       case IncModeWait:
@@ -846,14 +791,42 @@ void loop() {
           inc_check_encoders();
         }
         break;
-      /* 
+       
       case AccelModeWait:
+        if(pass || inc_mode){
+          old_mstate = mstate;
+          mstate = Passive;
+        } 
+        else{
+          // check encoders, if they move they will transition to AccelModeTurning
+          accel_check_encoders();
+        }
         break;
-      case AccelModeTurning: 
+      case AccelModeRun: 
+
+        // issue jog, wait for ok, reset encoder position
+        if(gotAccelOk){
+          gotAccelOk = false;
+          reset_pos();
+        }
+        
+
+        // Jog done, transition state
+        if(grbl_data->grbl.state == Idle){
+          old_mstate = mstate;
+          CMD_B = 0;
+          mstate = AccelModeWait;
+
+          // capture current position on encoders.  this is used to detect a move.
+          reset_pos();
+        }else{
+          _gs.d_status = "Waiting for Jog Stop";
+        }
         break;
       case AccelModeStop:
         break;
-      */
+      case AccelModeCancel:
+        break;
       case IncJogStart: 
         if(grbl_data->grbl.state == Jog){
           old_mstate = mstate;
@@ -873,7 +846,7 @@ void loop() {
           mstate = IncModeWait;
           CMD_B--;
           // capture current position on encoders.  this is used to detect a move.
-          inc_reset_pos();
+          reset_pos();
         }else{
           _gs.d_status = "Waiting for Jog Stop";
         }
