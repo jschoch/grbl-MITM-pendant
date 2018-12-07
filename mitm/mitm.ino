@@ -137,9 +137,14 @@ Neotimer btntimer = Neotimer(35);
 
 Neotimer displaytimer = Neotimer(75);
 
+// ensures we recover from missing a jog state transition
+
 Neotimer incjogstarttimeout = Neotimer(500);
 
 Neotimer mytimer = Neotimer(75);
+
+// allow for regular timing of velocity
+Neotimer veltimer = Neotimer(250);
 
 
 // limit batch jogs by time
@@ -197,7 +202,10 @@ int feedZ = 1000;
 int feed = 1000;
 int rapid = 2000;
 int rapidXY = 2000;
-float stepSize = 0.5;
+
+long defaultStepSize = 0.5;
+long stepSize = 0.5;
+int currentVel = 0;
 
 //  STM32 encoder stuff
 
@@ -263,27 +271,11 @@ void func_timer_3(){
 // uses internal timer 4 on PB6 and PB7
 //  not used
 
-// velocity
-
-long x_newposition;
-long x_oldposition = 0;
-unsigned long x_newtime;
-unsigned long x_oldtime = 0;
-long x_vel;
 
 
 /////////////////////////////////////////// Functions //////////////////////////////////////////////////
 
 
-// encoder velocity
-
-void calculate_velocity(){
-  if(!pass && !inc_mode){
-    Xaxis.velocity();
-    Yaxis.velocity();
-    Zaxis.velocity();
-  }
-}
 
 // configures hardwaretimers
 void config_timer(int channel, HardwareTimer this_timer, void (*func)()){
@@ -421,16 +413,53 @@ void accel_check_encoders(){
   accel_check_axis(Yaxis);
   accel_check_axis(Xaxis);
   accel_check_axis(Zaxis);
+  calculate_velocity(); 
+}
+void calculate_velocity(){
+  if(veltimer.repeat()){
+    static long a = Xaxis.velocity();
+    static long b = Yaxis.velocity();
+    static long c = Zaxis.velocity();
+    if(serial_dbg2){
+      Serial.print(a);
+      Serial.print(",");
+      Serial.print(b);
+      Serial.print(",");
+      Serial.print(c);
+      Serial.print(",");
+      Serial.println("Vel!"); 
+    }
+  }
 }
 
+
 void accel_check_axis(Axis &axis){
+  
+  /*
+  if(veltimer.repeat()){
+    long v = axis.velocity();
+    Serial.println(v);
+    }
+  */
+
   if(axis.moved() && (mstate == AccelModeWait || mstate == AccelModeRun) && !bufferFull()  && acceltimer.repeat())
     {
-    batchJog(axis);
-    old_mstate = mstate;
-    mstate = AccelModeRun;
-
-    //axis.resetPos();
+    stepSize = map((long)axis.vel,0.0, 1200.0, 0.01, 1.5);
+    if(stepSize > 0){
+      batchJog(axis);
+      old_mstate = mstate;
+      mstate = AccelModeRun;
+      currentVel = axis.vel;
+      //axis.resetPos();
+    }else{
+      Serial.print(currentVel);
+      Serial.print(",");
+      Serial.print(axis.vel);
+      Serial.print(",");
+      Serial.print(stepSize);
+      Serial.println("how do you move with zero velocity?");
+      axis.resetPos();
+    }
   }
 }
 
@@ -483,11 +512,11 @@ void halt(char * msg){
   // TODO: update display;
 }
 
-void batchJog(Axis axis){
+void batchJog(Axis &axis){
   batchJog("$J=G91 ",axis);
 }
 
-void batchJog(const char* start, Axis axis){
+void batchJog(const char* start, Axis &axis){
   if(!bufferFull()){
     doJog(start,axis);
     CMD_B++;
@@ -496,7 +525,7 @@ void batchJog(const char* start, Axis axis){
   
 
 // jogs axis one stepSize
-void waitJog(Axis axis){
+void waitJog(Axis &axis){
   waitJog("$J=G91 ", axis);
 }
 
@@ -504,7 +533,7 @@ void requestUpdate(){
   Serial2.print("?");
 }
 
-void waitJog(const char* start, Axis axis){
+void waitJog(const char* start, Axis &axis){
   if(!bufferFull() && !jogWait){
     doJog(start,axis);
     CMD_B++;
@@ -514,14 +543,14 @@ void waitJog(const char* start, Axis axis){
 
 
 
-void doJog(const char* start, Axis axis){
+void doJog(const char* start, Axis &axis){
 
   Serial2.print(start);
   Serial2.print(axis.axis_name);
   if(!axis.forward){
     Serial2.print("-");
   }
-  Serial2.print((stepSize));
+  Serial2.print(stepSize);
   Serial2.print("F");
   Serial2.println(feed);
 
@@ -530,19 +559,11 @@ void doJog(const char* start, Axis axis){
   if(serial_dbg2){
     Serial.print(axis.getOldPos());
     Serial.print(",");
-    Serial.println(axis.getPos());
-  }
-  if(serial_dbg){
-    Serial.print(okWait);
-    Serial.print(",");
-    Serial.print(jogWait);
-    Serial.print(":");
-    Serial.print(axis.getOldPos());
-    Serial.print(",");
     Serial.print(axis.getPos());
     Serial.print(",");
-    Serial.print(CMD_B);
-    Serial.println(" Jog");
+    Serial.print(currentVel);
+    Serial.print(",");
+    Serial.println(stepSize);
   }
 }
 
@@ -766,6 +787,7 @@ void loop() {
     checkBtns();
   }
   grbl_data_t *grbl_data = getData();
+
   switch(mstate){
       case SetupDone:
         if(pass){
@@ -793,18 +815,24 @@ void loop() {
         break;
        
       case AccelModeWait:
+        accel_check_encoders();
         if(pass || inc_mode){
           old_mstate = mstate;
           mstate = Passive;
         } 
         else{
-          // check encoders, if they move they will transition to AccelModeTurning
-          accel_check_encoders();
+          // ?
         }
         break;
+
+      //
+      //  Executing a Jog.  Jogs may be added to the queue
+      //
       case AccelModeRun: 
+        accel_check_encoders();
 
         // issue jog, wait for ok, reset encoder position
+        // TODO: need an Ok ack state to ensure no other commands get issued
         if(gotAccelOk){
           gotAccelOk = false;
           reset_pos();
@@ -816,6 +844,7 @@ void loop() {
           old_mstate = mstate;
           CMD_B = 0;
           mstate = AccelModeWait;
+          stepSize = defaultStepSize;
 
           // capture current position on encoders.  this is used to detect a move.
           reset_pos();
@@ -823,6 +852,11 @@ void loop() {
           _gs.d_status = "Waiting for Jog Stop";
         }
         break;
+
+      //
+      // transition state
+      //
+
       case AccelModeStop:
         break;
       case AccelModeCancel:

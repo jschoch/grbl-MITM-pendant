@@ -78,13 +78,14 @@ class Axis {
     }
     long velocity(){
       newtime = millis();
-      vel = abs(pos - vel_old_pos) * 1000 / (newtime - oldtime);
-      /*
+      vel = abs(pos - vel_old_pos) * 100000 / (newtime - oldtime);
+
+
       Serial.print("pos: ");
       Serial.print(pos);   
       Serial.print (" speed = ");
       Serial.println (vel);
-      */
+
       oldtime = newtime;
       vel_old_pos = pos;
       return vel;
