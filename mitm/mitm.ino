@@ -129,7 +129,7 @@ Bounce * buttons = new Bounce[NUM_BUTTONS];
 
 std::string current_mode = "Startup";
 
-uint8_t stepCnt = 1;
+uint8_t stepCnt = 3;
 
 // inc_mode moves one stepSize.  inc_mode false activates acceleration mode.
 // acceleration mode attempts to queue moves and to stop motion when the velocity of the wheel is zero.
@@ -432,6 +432,35 @@ void checkBtns(){
 
   }else{
     pass = true;
+  }
+  
+  if(buttons[STEP_INC].rose()){
+    stepCnt++;
+    updateStepSize();
+  }
+
+
+  if(buttons[INC_TOGGLE].rose()){
+      inc_mode = !inc_mode;
+      if(inc_mode){
+
+      }else{
+        // reset states
+        CMD_B = 0;
+        okWait = 0;
+      }
+  }
+
+  if(buttons[CLEAR_ALARM].rose()){
+      //TODO: using this button to mock a jog command, revert to $X
+    //  send unlock
+     Serial2.println("$X");
+
+  }
+
+  if(buttons[JOG_CANCEL].rose()){
+     //  TODO:  add stop jog command here
+     //cancelJog();
   }
 }
 

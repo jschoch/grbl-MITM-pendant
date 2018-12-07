@@ -1,9 +1,11 @@
-- [ ] move grbl_chat stuff to a src dir
-- [ ] fix parseFeedSpeed in grbl_chat.c
-- [ ] jeed a jogWait state.  Idle -> okWait -> Jogging -> Idle
+- [ ] Add back button parsing for stepSize
 - [ ] do some testing of echo and job start job end, I believe this may be "Run" mode
+- [X ] move grbl_chat stuff to a src dir
+- [X ] fix parseFeedSpeed in grbl_chat.c
+- [X ] jeed a jogWait state.  Idle -> okWait -> Jogging -> Idle
+-
 
- [X ] refactor okWatcher branch:  since we can't figure out which "ok" is for which command for jog's perhaps we should calculate the desired position and then wait until it is reached before clearing the "waiting" flag
+- [X ] refactor okWatcher branch:  since we can't figure out which "ok" is for which command for jog's perhaps we should calculate the desired position and then wait until it is reached before clearing the "waiting" flag
 - [X ] Add back encoder
 - [X ] Add back position parsing
 - [X ] tidy up msgs and display
