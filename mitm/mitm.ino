@@ -325,6 +325,10 @@ void readLine(){
             checkOk();
 
             parseData(cmd);
+            if(mstate == Passive){
+              Serial.print(cmd);
+              Serial.print("\n");
+            }
         }
     }
 }
@@ -468,7 +472,12 @@ void accel_check_axis(Axis &axis){
   doVelChecks(axis);
   if(axis.moved() && (mstate == AccelModeWait || mstate == AccelModeRun) && !bufferFull()  && acceltimer.repeat())
     {
-    stepSize = map((long)axis.vel,0.0, 8000.0, 1, 150);
+    //  Map for 600ppr encoder
+    //stepSize = map((long)axis.vel,0.0, 8000.0, 1, 150);
+  
+    // Map for 24ppr encoder
+
+    stepSize = map((long)axis.vel,0.0, 400.0, 1, 150);
     if(stepSize > 0){
       batchJog(axis);
       old_mstate = mstate;
@@ -812,7 +821,7 @@ void loop() {
   drawDisplay();
 
   //if(updatetimer.repeat() && mstate != AccelModeRun){
-  if(updatetimer.repeat()){
+  if(updatetimer.repeat() && mstate != Passive){
     requestUpdate(); 
   }
 
@@ -852,7 +861,12 @@ void loop() {
        
       case AccelModeWait:
         accel_check_encoders();
-        if(pass || inc_mode){
+
+        if(inc_mode){
+          old_mstate = mstate;
+          mstate = IncModeWait;
+        }
+        if(pass ){
           old_mstate = mstate;
           mstate = Passive;
         } 
@@ -941,9 +955,11 @@ void loop() {
     }
 
     if(grbl_data->grbl.state != old_grbl_state){
-      Serial.print("New State: ");
-      Serial.println(grbl_data->grbl.state);
-      old_grbl_state = grbl_data->grbl.state;
+      if (serial_dbg){
+        Serial.print("New State: ");
+        Serial.println(grbl_data->grbl.state);
+        old_grbl_state = grbl_data->grbl.state;
+      }
     }
 
     if (last_mstate != mstate){
