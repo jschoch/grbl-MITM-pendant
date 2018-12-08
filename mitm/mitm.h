@@ -77,7 +77,7 @@ class Axis {
     void notRunning(){
       running = false;
     }
-    long velocity2(){
+    long velocity(){
       newtime = millis();
       vel = abs(pos - vel_old_pos) * 10000 / (newtime - oldtime);
 

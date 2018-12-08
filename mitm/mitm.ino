@@ -66,8 +66,10 @@ uint8_t old_grbl_state = Unknown;
 bool newResp = false;
 bool newPush = false;
 bool newMsg = false;
-bool serial_dbg = true;
-bool serial_dbg2 = true;
+
+bool serial_dbg = false;
+bool serial_dbg2 = false;
+
 bool halted = false;
 bool disp_tick = false;
 bool gotAccelOk = false;
@@ -111,8 +113,6 @@ const int NUM_BUTTONS = 5;
 const uint8_t BUTTON_PINS[NUM_BUTTONS] = {btn1,btn2,btn3,btn4,btn5};
 Bounce * buttons = new Bounce[NUM_BUTTONS];
 
-std::string current_mode = "Startup";
-
 uint8_t stepCnt = 3;
 
 // inc_mode moves one stepSize.  inc_mode false activates acceleration mode.
@@ -136,6 +136,10 @@ Neotimer btntimer = Neotimer(35);
 // timer for updating screen
 
 Neotimer displaytimer = Neotimer(75);
+
+// timer for waiting for grbl to go back to IDLE state after CMD_JOG_CANCEL
+
+Neotimer canceltimer = Neotimer(200);
 
 // ensures we recover from missing a jog state transition
 
@@ -203,8 +207,10 @@ int feed = 1000;
 int rapid = 2000;
 int rapidXY = 2000;
 
-long defaultStepSize = 0.5;
-long stepSize = 0.5;
+
+// store hundreths of a mm, this is converted back to mm in doJog
+long defaultStepSize = 50;
+long stepSize = 50;
 int currentVel = 0;
 
 //  STM32 encoder stuff
@@ -326,7 +332,7 @@ void readLine(){
 
 void checkOk(){
   if(cmd[0] == 'o' && cmd[1] == 'k'){
-    if(mstate == AccelModeRun){
+    if(mstate == AccelModeRun && CMD_B > 0){
       CMD_B--;
       }
     }
@@ -347,25 +353,25 @@ void dbgln(char* s){
 void updateStepSize(){
   if(stepCnt <= 1){
     stepCnt = 1;
-    stepSize = 0.01;
+    stepSize = 1;
   }else{
     if(stepCnt == 2){
-      stepSize = 0.1;
+      stepSize = 10;
     }
     else if(stepCnt == 3){
-      stepSize = 0.5;
+      stepSize = 50;
     }
     else if(stepCnt == 4){
-      stepSize = 1.0;
+      stepSize = 100;
     }
     else if(stepCnt == 5){
-      stepSize = 5.0;
+      stepSize = 500;
     }
     else if(stepCnt == 6){
-      stepSize = 10.0;
+      stepSize = 1000;
     }
     else{
-      stepSize = 10.0;
+      stepSize = 1000;
       stepCnt = 1;
     }
   }
@@ -413,14 +419,19 @@ void accel_check_encoders(){
   accel_check_axis(Yaxis);
   accel_check_axis(Xaxis);
   accel_check_axis(Zaxis);
-  calculate_velocity(); 
+  //calculate_velocity(); 
 }
+
 void calculate_velocity(){
   if(veltimer.repeat()){
-    long a = Xaxis.velocity2();
-    long b = Yaxis.velocity2();
-    long c = Zaxis.velocity2();
+    doVelChecks(Xaxis);
+    doVelChecks(Xaxis);
+    doVelChecks(Xaxis);
+    //long a = Xaxis.velocity();
+    //long b = Yaxis.velocity();
+    //long c = Zaxis.velocity();
 
+    /*
     if(serial_dbg2){
       Serial.print(a);
       Serial.print(",");
@@ -430,35 +441,46 @@ void calculate_velocity(){
       Serial.print(",");
       Serial.println("Vel!"); 
     }
+    */
   }
 }
+
+void doVelChecks(Axis &axis){
+  long a = axis.velocity();
+
+  
+  if(a == 0 && axis.running && AccelModeRun){
+    mstate = AccelModeCancel;
+    Serial2.flush();
+    Serial2.write(CMD_JOG_CANCEL);
+    Serial2.flush();
+    CMD_B = 0;
+    _gs.d_status = "STOP!";
+    axis.notRunning();
+  }
+  
+}
+
 
 
 void accel_check_axis(Axis &axis){
   
-  /*
-  if(veltimer.repeat()){
-    long v = axis.velocity();
-    Serial.println(v);
-    }
-  */
-
+  doVelChecks(axis);
   if(axis.moved() && (mstate == AccelModeWait || mstate == AccelModeRun) && !bufferFull()  && acceltimer.repeat())
     {
-    stepSize = map((long)axis.vel,0.0, 8000.0, 0.01, 1.5);
+    stepSize = map((long)axis.vel,0.0, 8000.0, 1, 150);
     if(stepSize > 0){
       batchJog(axis);
       old_mstate = mstate;
       mstate = AccelModeRun;
       currentVel = axis.vel;
+      axis.setRunning();
+      if(serial_dbg){
+        Serial.print("StepSize: ");
+        Serial.println(stepSize);
+      }  
       //axis.resetPos();
     }else{
-      Serial.print(currentVel);
-      Serial.print(",");
-      Serial.print(axis.vel);
-      Serial.print(",");
-      Serial.print(stepSize);
-      Serial.println("how do you move with zero velocity?");
       axis.resetPos();
     }
   }
@@ -521,6 +543,11 @@ void batchJog(const char* start, Axis &axis){
   if(!bufferFull()){
     doJog(start,axis);
     CMD_B++;
+  }else{
+    if(serial_dbg){
+      Serial.println(CMD_B);
+      Serial.println("Buffer full");
+    }
   }
 }
   
@@ -551,13 +578,23 @@ void doJog(const char* start, Axis &axis){
   if(!axis.forward){
     Serial2.print("-");
   }
-  Serial2.print(stepSize);
+  Serial2.print((stepSize /100.0));
   Serial2.print("F");
   Serial2.println(feed);
 
 
   // 
   if(serial_dbg2){
+    Serial.print(start);
+    Serial.print(axis.axis_name);
+    if(!axis.forward){
+      Serial.print("-");
+    }
+    Serial.print((stepSize /100.0));
+    Serial.print("F");
+    Serial.println(feed);
+
+
     Serial.print(axis.getOldPos());
     Serial.print(",");
     Serial.print(axis.getPos());
@@ -628,14 +665,12 @@ void drawPOS(){
 }
 
 void drawMode(){
-
+  grbl_data_t *grbl_data = getData();
   display.setTextColor(WHITE,BLACK);
   display.setCursor(0,0);
   display.print(cStateNames[mstate]);
   display.print("#");
-  display.print(current_mode.c_str());
-  //display.print(" | ");
-  //display.print(oldPos.lastState);
+  display.print(stateNames[grbl_data->grbl.state]);
 }
 
 void drawStep(){
@@ -861,6 +896,13 @@ void loop() {
       case AccelModeStop:
         break;
       case AccelModeCancel:
+        if(canceltimer.repeat()){
+          Serial2.println("G4P0");
+        }
+        if(grbl_data->grbl.state == Idle){
+          _gs.d_status = "Wait for a jog";
+          mstate = AccelModeWait;
+        }
         break;
       case IncJogStart: 
         if(grbl_data->grbl.state == Jog){
