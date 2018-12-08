@@ -514,14 +514,8 @@ void checkBtns(){
 
 
   if(buttons[INC_TOGGLE].rose()){
-      inc_mode = !inc_mode;
-      if(inc_mode){
-
-      }else{
-        // reset states
-        CMD_B = 0;
-        okWait = 0;
-      }
+    inc_mode = !inc_mode;
+    CMD_B = 0;
   }
 
   if(buttons[CLEAR_ALARM].rose()){
@@ -856,6 +850,10 @@ void loop() {
         }else{
           // check encoders, if they move they will transition to IncJogStart
           inc_check_encoders();
+        }
+        if(!inc_mode){
+          old_mstate = mstate;
+          mstate =  AccelModeWait;
         }
         break;
        
