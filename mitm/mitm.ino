@@ -25,7 +25,7 @@ this mode will issue jog commands while the encoder wheel keeps turning and the 
 
 mode 3 is setup modes.  this mode is used to set virtual stops
 
-Cutting modes
+#Cutting modes
 
 
 mode 4 is facing mode.  encoder turns will start a "pass", "stepover" or "plunge/ramp"
@@ -67,8 +67,8 @@ bool newResp = false;
 bool newPush = false;
 bool newMsg = false;
 
-bool serial_dbg = false;
-bool serial_dbg2 = false;
+bool serial_dbg = true;
+bool serial_dbg2 = true;
 
 bool halted = false;
 bool disp_tick = false;
@@ -216,9 +216,11 @@ int currentVel = 0;
 //  STM32 encoder stuff
 
 //
-// PA8/PA9 timer_1
-// PA0/PA1 timer_2
-// PB6/PB7 timer_3
+// PA8/PA9 timer_1   Xaxis
+// PA0/PA1 timer_2   Zaxis
+// PA6/PA7 timer_3   Yaxis
+// PB6/PB7 TIMER_4 BUT
+// PB6/PB7 also SDA!
 //
 
 
@@ -725,8 +727,12 @@ void setup() {
   pinMode(PC13,OUTPUT);
   pinMode(PA0, INPUT_PULLUP);
   pinMode(PA1, INPUT_PULLUP);
+
+  // SDA SCL
   pinMode(PA6, INPUT_PULLUP);
   pinMode(PA7, INPUT_PULLUP);
+
+
   //pinMode(PB6, INPUT_PULLUP);
   //pinMode(PB7, INPUT_PULLUP);
   pinMode(PB0, INPUT_PULLUP);

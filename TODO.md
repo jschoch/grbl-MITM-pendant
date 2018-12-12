@@ -1,3 +1,5 @@
+-[ ] add pot and ADC read for setting inc_mode feed and for adjusting accelmode's map function
+
 - [ ] do some testing of echo and job start job end, I believe this may be "Run" mode
 - [ ] add back velocity, use map to map velocity to 0.01 .. 1.5 jog step range
 
