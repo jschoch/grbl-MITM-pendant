@@ -604,7 +604,7 @@ void doJog(const char* start, Axis &axis){
   // G1 Y-79.70 F1000.00
 
   // G1 Y-79.7 F1000.0
-  float mpg_factor = 0.01;
+  float mpg_factor = 0.05;
 
   grbl_data_t *grbl_data = getData();
   Serial2.print(start);
