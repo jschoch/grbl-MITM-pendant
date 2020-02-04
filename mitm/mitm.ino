@@ -151,7 +151,7 @@ Neotimer incjogstarttimeout = Neotimer(50);
 Neotimer mytimer = Neotimer(75);
 
 // allow for regular timing of velocity
-Neotimer veltimer = Neotimer(250);
+Neotimer veltimer = Neotimer(20);
 
 
 // limit batch jogs by time
@@ -429,7 +429,7 @@ void accel_check_encoders(){
   accel_check_axis(Yaxis);
   accel_check_axis(Xaxis);
   accel_check_axis(Zaxis);
-  //calculate_velocity(); 
+  calculate_velocity(); 
 }
 
 void calculate_velocity(){
@@ -456,15 +456,12 @@ void calculate_velocity(){
 }
 
 void doVelChecks(Axis &axis){
-  long a = axis.velocity();
   
-  //  Commented out due to velocity not working
-  /* 
-  if(a == 0 && axis.running && AccelModeRun){
+  if(axis.vel == 0 && axis.running && mstate == AccelModeRun){
     mstate = AccelModeCancel;
     if(serial_dbg)
       {
-      Serial.print(a);
+      Serial.print(axis.vel);
       Serial.println(" JOG_CANCEL");
     }
     Serial2.flush();
@@ -472,9 +469,9 @@ void doVelChecks(Axis &axis){
     Serial2.flush();
     CMD_B = 0;
     _gs.d_status = "STOP!";
+    axis.resetPos();
     axis.notRunning();
   }
-  */
   
 }
 
@@ -486,7 +483,16 @@ void accel_check_axis(Axis &axis){
   if(axis.moved() && (mstate == AccelModeWait || mstate == AccelModeRun) && !bufferFull()  && acceltimer.repeat())
     {
     //  Map for 600ppr encoder
-    stepSize = map((long)axis.vel,0.0, 8000.0, 1, 150);
+    //stepSize = map((long)axis.vel,0.0, 8000.0, 1, 150);
+  
+    float tmpStepSize = (axis.vel * axis.vel) * 0.005;
+
+    if(tmpStepSize < 2){
+      stepSize = tmpStepSize;
+    }else{
+      stepSize = 2.0;
+    }
+    
   
     // Map for 24ppr encoder
 
@@ -553,8 +559,10 @@ void halt(char * msg){
   // TODO: update display;
 }
 
+
+// queue up the jog commands and cancel when you the MPG acceleration goes to 0
 void batchJog(Axis &axis){
-  batchJog("G1 ",axis);
+  batchJog("$J=G91 ",axis);
 }
 
 void batchJog(const char* start, Axis &axis){
@@ -596,18 +604,29 @@ void doJog(const char* start, Axis &axis){
   // G1 Y-79.70 F1000.00
 
   // G1 Y-79.7 F1000.0
+  float mpg_factor = 0.01;
 
   grbl_data_t *grbl_data = getData();
   Serial2.print(start);
   Serial2.print(axis.axis_name);
+
+  /*  favoring G91
+  float jog_pos = (grbl_data->position[axis.axis_num] + stepSize);
   if(!axis.forward){
     //Serial2.print("-");
+    jog_pos = (grbl_data->position[axis.axis_num] - stepSize) ;
+  }
+  */
+
+  float jog_pos = stepSize;
+  if(!axis.forward){
+    Serial2.print("-");
   }
   //Serial2.print((stepSize /100.0));
   // grbl_data->position[Y_AXIS]
-  Serial2.print((grbl_data->position[axis.axis_num] + stepSize));
+  Serial2.print(jog_pos);
   Serial2.print(" F");
-  Serial2.println(feed);
+  Serial2.println((feed * mpg_factor) * axis.vel);
 
 
   // 
@@ -619,7 +638,7 @@ void doJog(const char* start, Axis &axis){
     }
     Serial.print((grbl_data->position[axis.axis_num] + stepSize));
     Serial.print(" F");
-    Serial.println(feed);
+    Serial.println((feed * mpg_factor) * axis.vel);
 
 
     Serial.print(axis.getOldPos());
@@ -630,6 +649,54 @@ void doJog(const char* start, Axis &axis){
     Serial.print(",");
     Serial.println(stepSize);
   }
+}
+
+void smartJog(Axis &axis){
+  /* terjeio's stuff
+  
+  // gets a snapshot of the current mpg position
+  pos = MPG_GetPosition();
+
+  // get distance between mpg position and the projected move position
+  delta_z = (float)(pos->z.position - axis[Z_AXIS].mpg_position) * axis[Z_AXIS].mpg_factor / 400.0f;
+
+  // update mpg_position to snapshot position
+  axis[Z_AXIS].mpg_position = pos->z.position;
+
+  // absDistance is a bool, maybe setting absolute mode moves? 
+  if(grbl_data->absDistance)
+    // mpg_base is reset in MPG_ResetPosition when grbl_dat->changed.mpg is true
+    axis[Z_AXIS].mpg_base += delta_z;
+
+  // velocity *50 seems to be used to set the feedrate
+  velocity = pos->z.velocity;
+  sprintf(append(buffer), "Z%.3f", grbl_data->absDistance ? axis[Z_AXIS].mpg_base - grbl_data->offset[Z_AXIS] : delta_z);
+
+
+  formula:
+  
+  dt is estimated jog time
+  v current jog rate
+  N is the number of planner blocks N=15
+
+  dt > v^2 / (2 * a * (N-1))
+
+  T = dt * N  ; computes latency
+
+  max_jog_rate is rate in mm/s/s
+
+  a is the max acceleration along the jog vector
+  estimated_jog_time = current_jog_rate / (2 * max_jog_rate_accel *10)
+
+  jog_distance = current_jog_rate * estimated_jog_time
+
+
+  given max_jog_rate = 1000mm/s and current_jog_rate = 100mm/s
+
+  estimated_jog_time = 
+  */
+
+   
 }
 
 /////////////////////////////////////// DISPLAY /////////////////////////////////////////////////////
@@ -683,9 +750,16 @@ void drawPOS(){
   display.print("X: ");
   //display.println(oldPos.mpos.x);
   display.println(grbl_data->position[X_AXIS]);
-  display.print("Y: ");
+
+  if(Yaxis.running){
+    display.print("Y: ");
+  }else{
+    display.print("y: ");
+  }
   //display.println(oldPos.mpos.y);
-  display.println(grbl_data->position[Y_AXIS]);
+  display.print(grbl_data->position[Y_AXIS]);
+  display.print(" ");
+  display.println(Yaxis.velocity());
   display.print("Z: ");
   //display.println(oldPos.mpos.z);
   display.println(grbl_data->position[Z_AXIS]);
@@ -938,6 +1012,9 @@ void loop() {
         break;
       case AccelModeCancel:
         if(canceltimer.repeat()){
+          if(serial_dbg)
+            Serial.println("G4P0");
+
           Serial2.println("G4P0");
         }
         if(grbl_data->grbl.state == Idle){

@@ -18,6 +18,7 @@ class Axis {
     unsigned long oldtime;
     int feed;
     float step;
+    float factor;
     int axis_num;
 
     //Axis(const char *axis_name="UNDEF", HardwareTimer &t)
@@ -80,7 +81,7 @@ class Axis {
     }
     long velocity(){
       newtime = millis();
-      vel = abs(pos - vel_old_pos) * 10000 / (newtime - oldtime);
+      vel = abs(pos - vel_old_pos) * 100 / (newtime - oldtime);
 
       /*
       Serial.print("pos: ");
