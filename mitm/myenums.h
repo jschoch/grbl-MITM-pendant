@@ -1,11 +1,11 @@
 
 
 enum buttons_enum {
-  PASS_TOGGLE,
-  STEP_INC,
-  INC_TOGGLE,
-  CLEAR_ALARM,
-  JOG_CANCEL 
+  PASS_TOGGLE, // PB15
+  STEP_INC, // PB4
+  INC_TOGGLE, // PA4
+  CLEAR_ALARM, // PA15
+  JOG_CANCEL // PB12
 };
 
 enum ctrl_states{

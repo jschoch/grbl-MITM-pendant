@@ -38,6 +38,9 @@ mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
 
 // TODO: in pass mode use wheels  to adjust feeds 
 
+#undef min
+#undef max
+
 #include "HardwareTimer.h"
 #include "mitm.h"
 #include <string>
@@ -102,11 +105,11 @@ char readch;
 
 // btns
 
-uint8_t btn1 = PB15;
-uint8_t btn2 = PB4;
-uint8_t btn3 = PA4;
-uint8_t btn4 = PA15;
-uint8_t btn5 = PB12;
+uint8_t btn1 = PB15; // PASS_TOGGLE
+uint8_t btn2 = PB4; // STEP_INC
+uint8_t btn3 = PA5; // INC_TOGGLE
+uint8_t btn4 = PA15;// CLEAR_ALARM
+uint8_t btn5 = PB12; // JOG_CANCEL
 
 
 const int NUM_BUTTONS = 5;
@@ -143,7 +146,7 @@ Neotimer canceltimer = Neotimer(200);
 
 // ensures we recover from missing a jog state transition
 
-Neotimer incjogstarttimeout = Neotimer(500);
+Neotimer incjogstarttimeout = Neotimer(50);
 
 Neotimer mytimer = Neotimer(75);
 
@@ -157,7 +160,7 @@ Neotimer acceltimer = Neotimer(150);
 
 // timer for getting updates via "?"
 
-Neotimer updatetimer = Neotimer(25);
+Neotimer updatetimer = Neotimer(100);
 
 
 // timer for getting status
@@ -209,8 +212,8 @@ int rapidXY = 2000;
 
 
 // store hundreths of a mm, this is converted back to mm in doJog
-long defaultStepSize = 50;
-long stepSize = 50;
+float defaultStepSize = 0.2;
+float stepSize = 0.2;
 int currentVel = 0;
 
 //  STM32 encoder stuff
@@ -228,7 +231,7 @@ int PPR = 4;
 
 HardwareTimer timer_1(1);
 
-Axis Xaxis("X",timer_1);
+Axis Xaxis("X",X_AXIS,timer_1);
 
 
 void func_timer_1(){
@@ -244,7 +247,7 @@ void func_timer_1(){
 // uses internal timer 2 on PA0 and PA1
 HardwareTimer timer_2(2);
 
-Axis Zaxis("Z",timer_2);
+Axis Zaxis("Z",Z_AXIS,timer_2);
 
 void func_timer_2(){
    if(timer_2.getDirection()){
@@ -264,7 +267,7 @@ HardwareTimer timer_3(3);
 
 volatile long ypos = 0;
 volatile long yold_pos = 2;
-Axis Yaxis("Y", timer_3);
+Axis Yaxis("Y", Y_AXIS,timer_3);
 
 void func_timer_3(){
    if(timer_3.getDirection()){
@@ -310,7 +313,7 @@ void readLine(){
         // TODO need to mute this when connected to the sender
         if(serial_dbg){
 
-          //Serial.write(rc);
+          Serial.write(rc);
 
         }
         if (rc != endMarker) {
@@ -325,7 +328,8 @@ void readLine(){
             ndx = 0;
   
             checkOk();
-
+            //if(serial_dbg)
+              //Serial.write(cmd);
             parseData(cmd);
             if(mstate == Passive){
               Serial.print(cmd);
@@ -359,25 +363,25 @@ void dbgln(char* s){
 void updateStepSize(){
   if(stepCnt <= 1){
     stepCnt = 1;
-    stepSize = 1;
+    stepSize = defaultStepSize;
   }else{
     if(stepCnt == 2){
-      stepSize = 10;
+      stepSize = stepSize * 2;
     }
     else if(stepCnt == 3){
-      stepSize = 50;
+      stepSize = stepSize * 2;
     }
     else if(stepCnt == 4){
-      stepSize = 100;
+      stepSize = stepSize * 2;
     }
     else if(stepCnt == 5){
-      stepSize = 500;
+      stepSize = stepSize * 2;
     }
     else if(stepCnt == 6){
-      stepSize = 1000;
+      stepSize = stepSize * 2;
     }
     else{
-      stepSize = 1000;
+      stepSize = 10;
       stepCnt = 1;
     }
   }
@@ -414,9 +418,9 @@ void inc_check_axis(Axis &axis){
   if(axis.moved() && mstate == IncModeWait )
     {
     waitJog(axis);
-    old_mstate = mstate;
-    mstate = IncJogStart;
-    incjogstarttimeout.start();
+    //old_mstate = mstate;
+    //mstate = IncJogStart;
+    //incjogstarttimeout.start();
     axis.resetPos();
   }
 }
@@ -431,8 +435,8 @@ void accel_check_encoders(){
 void calculate_velocity(){
   if(veltimer.repeat()){
     doVelChecks(Xaxis);
-    doVelChecks(Xaxis);
-    doVelChecks(Xaxis);
+    doVelChecks(Yaxis);
+    doVelChecks(Zaxis);
     //long a = Xaxis.velocity();
     //long b = Yaxis.velocity();
     //long c = Zaxis.velocity();
@@ -453,10 +457,16 @@ void calculate_velocity(){
 
 void doVelChecks(Axis &axis){
   long a = axis.velocity();
-
   
+  //  Commented out due to velocity not working
+  /* 
   if(a == 0 && axis.running && AccelModeRun){
     mstate = AccelModeCancel;
+    if(serial_dbg)
+      {
+      Serial.print(a);
+      Serial.println(" JOG_CANCEL");
+    }
     Serial2.flush();
     Serial2.write(CMD_JOG_CANCEL);
     Serial2.flush();
@@ -464,6 +474,7 @@ void doVelChecks(Axis &axis){
     _gs.d_status = "STOP!";
     axis.notRunning();
   }
+  */
   
 }
 
@@ -475,11 +486,11 @@ void accel_check_axis(Axis &axis){
   if(axis.moved() && (mstate == AccelModeWait || mstate == AccelModeRun) && !bufferFull()  && acceltimer.repeat())
     {
     //  Map for 600ppr encoder
-    //stepSize = map((long)axis.vel,0.0, 8000.0, 1, 150);
+    stepSize = map((long)axis.vel,0.0, 8000.0, 1, 150);
   
     // Map for 24ppr encoder
 
-    stepSize = map((long)axis.vel,0.0, 400.0, 1, 150);
+    //stepSize = map((long)axis.vel,0.0, 400.0, 1, 150);
     if(stepSize > 0){
       batchJog(axis);
       old_mstate = mstate;
@@ -523,7 +534,9 @@ void checkBtns(){
   if(buttons[CLEAR_ALARM].rose()){
       //TODO: using this button to mock a jog command, revert to $X
     //  send unlock
-     Serial2.println("$X");
+    if(serial_dbg)
+      Serial.print("CLEAR_ALARM $X");
+     Serial2.println("$X\n");
 
   }
 
@@ -541,7 +554,7 @@ void halt(char * msg){
 }
 
 void batchJog(Axis &axis){
-  batchJog("$J=G91 ",axis);
+  batchJog("G1 ",axis);
 }
 
 void batchJog(const char* start, Axis &axis){
@@ -559,7 +572,8 @@ void batchJog(const char* start, Axis &axis){
 
 // jogs axis one stepSize
 void waitJog(Axis &axis){
-  waitJog("$J=G91 ", axis);
+  //waitJog("$J=G91 ", axis);
+  waitJog("G1 ",axis);
 }
 
 void requestUpdate(){
@@ -569,7 +583,7 @@ void requestUpdate(){
 void waitJog(const char* start, Axis &axis){
   if(!bufferFull() && !jogWait){
     doJog(start,axis);
-    CMD_B++;
+    //CMD_B++;
     requestUpdate();
   }
 }
@@ -578,13 +592,21 @@ void waitJog(const char* start, Axis &axis){
 
 void doJog(const char* start, Axis &axis){
 
+  // this is no good
+  // G1 Y-79.70 F1000.00
+
+  // G1 Y-79.7 F1000.0
+
+  grbl_data_t *grbl_data = getData();
   Serial2.print(start);
   Serial2.print(axis.axis_name);
   if(!axis.forward){
-    Serial2.print("-");
+    //Serial2.print("-");
   }
-  Serial2.print((stepSize /100.0));
-  Serial2.print("F");
+  //Serial2.print((stepSize /100.0));
+  // grbl_data->position[Y_AXIS]
+  Serial2.print((grbl_data->position[axis.axis_num] + stepSize));
+  Serial2.print(" F");
   Serial2.println(feed);
 
 
@@ -593,10 +615,10 @@ void doJog(const char* start, Axis &axis){
     Serial.print(start);
     Serial.print(axis.axis_name);
     if(!axis.forward){
-      Serial.print("-");
+      //Serial.print("-");
     }
-    Serial.print((stepSize /100.0));
-    Serial.print("F");
+    Serial.print((grbl_data->position[axis.axis_num] + stepSize));
+    Serial.print(" F");
     Serial.println(feed);
 
 
@@ -804,6 +826,7 @@ void setup() {
   //grbl_data_t * grlb_data = getData(); 
   //delay(15000);
   mstate = SetupDone;
+  Serial.println("setup done");
 } // end setup
 
 
@@ -838,15 +861,15 @@ void loop() {
         if(pass){
           mstate = Passive;
         }else{
-          //mstate = IncModeWait;
-          mstate = AccelModeWait;
+          mstate = IncModeWait;
+          //mstate = AccelModeWait;
         }  
         break;
       case Passive:
         if(pass == false){
           old_mstate = mstate;
-          //mstate = IncModeWait;
-           mstate = AccelModeWait;
+          mstate = IncModeWait;
+          //mstate = AccelModeWait;
         }
         break;
       case IncModeWait:

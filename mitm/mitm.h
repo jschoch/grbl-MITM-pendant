@@ -18,11 +18,12 @@ class Axis {
     unsigned long oldtime;
     int feed;
     float step;
+    int axis_num;
 
     //Axis(const char *axis_name="UNDEF", HardwareTimer &t)
-    Axis(const char *axis_name, HardwareTimer &t)
+    Axis(const char *axis_name, int axis_num, HardwareTimer &t)
         //: axis_name(axis_name), id(id), pos(1), old_pos(1)
-        : axis_name(axis_name), timer(t)
+        : axis_name(axis_name), axis_num(axis_num),timer(t)
     {
         // constructor takes care of initialization
     }
