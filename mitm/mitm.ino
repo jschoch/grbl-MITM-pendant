@@ -151,7 +151,7 @@ Neotimer incjogstarttimeout = Neotimer(50);
 Neotimer mytimer = Neotimer(75);
 
 // allow for regular timing of velocity
-Neotimer veltimer = Neotimer(20);
+Neotimer veltimer = Neotimer(2);
 
 
 // limit batch jogs by time
@@ -171,21 +171,6 @@ Neotimer lasttimer = Neotimer(50);
 
 // display stuff
 
-/* no need to change i2c2 now
-// change to i2c2
-
-//#include <libmaple/i2c.h>
-
-//i2c_master_enable(i2c1,I2C_REMAP);
-
-//HardWire Wire(1,I2C_REMAP);
-*/
-
-/*
-TwoWire Wire2(PB11, PB10);
-
-#define Wire Wire2
-*/
 
 #define SSD1306_128_64
 #define OLED_RESET 4
@@ -457,8 +442,7 @@ void calculate_velocity(){
 }
 
 void doVelChecks(Axis &axis){
-  
-  if(axis.vel == 0 && axis.running && mstate == AccelModeRun){
+  if(axis.vel < 10 && axis.running && mstate == AccelModeRun){
     mstate = AccelModeCancel;
     if(serial_dbg)
       {
@@ -486,12 +470,18 @@ void accel_check_axis(Axis &axis){
     //  Map for 600ppr encoder
     //stepSize = map((long)axis.vel,0.0, 8000.0, 1, 150);
   
-    float tmpStepSize = (axis.vel * axis.vel * axis.vel) * 0.00000001;
+    // should start producing steps at 50 vel
+    float tmpStepSize = (axis.vel * axis.vel * axis.vel) * 0.00001;
   
-    if(tmpStepSize < 2.0){
-      stepSize = tmpStepSize;
+    if(tmpStepSize < 0.01){
+      axis.resetPos();
+      return;
     }else{
-      stepSize = 2;
+      if(tmpStepSize < 2.0 ){
+        stepSize = tmpStepSize;
+      }else{
+        stepSize = 2;
+      }
     }
     
   
@@ -606,7 +596,7 @@ void doJog(const char* start, Axis &axis){
   // G1 Y-79.70 F1000.00
 
   // G1 Y-79.7 F1000.0
-  float mpg_factor = 0.1;
+  float mpg_factor = 0.01;
 
   grbl_data_t *grbl_data = getData();
   Serial2.print(start);
@@ -614,13 +604,14 @@ void doJog(const char* start, Axis &axis){
 
 
   float jog_pos = stepSize;
+  axis.feed = (feed * mpg_factor) * axis.vel;
   if(!axis.forward){
     Serial2.print("-");
   }
 
   Serial2.print(jog_pos);
   Serial2.print(" F");
-  Serial2.println((feed * mpg_factor) * axis.vel);
+  Serial2.println(axis.feed);
 
 
   // 
@@ -632,7 +623,7 @@ void doJog(const char* start, Axis &axis){
     }
     Serial.print(jog_pos);
     Serial.print(" F");
-    Serial.println((feed * mpg_factor) * axis.vel);
+    Serial.println(axis.feed);
 
 
     Serial.print(axis.getOldPos());
@@ -708,12 +699,7 @@ void drawCMD(std::string &c){
   display.print(" : ");
 
   grbl_data_t *grbl_data = getData();
-  //display.print(gD->grbl.state);
-  display.print(stateNames[grbl_data->grbl.state]);
-  //Serial.println(stateNames[grbl_data->grbl.state]);
-
-  //display.print(" okWait: ");
-  //display.print(okWait);
+  display.print(shortNames[grbl_data->grbl.state]);
   display.setCursor(0,0);
 }
 
@@ -745,6 +731,8 @@ void drawPOS(){
   //display.println(oldPos.mpos.x);
   display.println(grbl_data->position[X_AXIS]);
 
+  // Y stuff
+
   if(Yaxis.running){
     display.print("Y: ");
   }else{
@@ -754,6 +742,10 @@ void drawPOS(){
   display.print(grbl_data->position[Y_AXIS]);
   display.print(" ");
   display.println(Yaxis.velocity());
+  display.print(" ");
+  display.print(Yaxis.feed);  
+
+  // z:
   display.print("Z: ");
   //display.println(oldPos.mpos.z);
   display.println(grbl_data->position[Z_AXIS]);
@@ -763,7 +755,7 @@ void drawMode(){
   grbl_data_t *grbl_data = getData();
   display.setTextColor(WHITE,BLACK);
   display.setCursor(0,0);
-  display.print(cStateNames[mstate]);
+  display.print(shortNames[mstate]);
   display.print("#");
   display.print(stateNames[grbl_data->grbl.state]);
 }

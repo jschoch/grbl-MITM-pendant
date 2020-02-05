@@ -59,3 +59,20 @@ const char* cStateNames[] = {
   "Halt"
 };
 
+const char* shortNames[] = {
+  "S",
+  "SD",
+  "Pas",
+  "IMW",
+  "AMW",
+  "AMS",
+  "AMR",
+  "AMH",
+  "AMC",
+  "IJS",
+  "IJST",
+  "IJR",
+  "IJE",
+  "Halt"
+};
+

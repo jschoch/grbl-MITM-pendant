@@ -1,5 +1,8 @@
 #include "HardwareTimer.h"
 #include "Arduino.h"
+#include <EwmaT.h>
+
+EwmaT <int> adcFilter(50, 50);
 
 class Axis {
     
@@ -39,6 +42,7 @@ class Axis {
         running = false;
         forward = true;
         oldtime = millis();
+        feed = 100;
         
     }
 
@@ -84,13 +88,13 @@ class Axis {
     }
     long velocity(){
       newtime = millis();
-      current_vel = abs(pos - vel_old_pos) * 1000 / (newtime - oldtime);
-      if(current_vel > 5){
-        vel = (oldvel + current_vel)/2;
-        oldvel = vel;
+      //current_vel = abs(pos - vel_old_pos) * 1000 / (newtime - oldtime);
+      current_vel = adcFilter.filter(abs(pos - vel_old_pos) * 100 / (newtime - oldtime)); 
+      if(current_vel > 1){
+        vel = current_vel;
       }else{
         vel = 0;
-        oldvel = 0;
+        //oldvel = 0;
       }
       /*
       Serial.print("pos: ");
