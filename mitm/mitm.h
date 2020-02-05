@@ -13,6 +13,8 @@ class Axis {
     long vel_new_pos;
     long vel_old_pos;
     long vel;
+    long oldvel;
+    long current_vel;
     bool running;
     unsigned long newtime;
     unsigned long oldtime;
@@ -32,6 +34,7 @@ class Axis {
     void begin(const char* in_name, int feed, float step) {
         axis_name = in_name;
         old_pos=1L;
+        oldvel = 0;
         pos=1L;
         running = false;
         forward = true;
@@ -81,8 +84,14 @@ class Axis {
     }
     long velocity(){
       newtime = millis();
-      vel = abs(pos - vel_old_pos) * 100 / (newtime - oldtime);
-
+      current_vel = abs(pos - vel_old_pos) * 1000 / (newtime - oldtime);
+      if(current_vel > 5){
+        vel = (oldvel + current_vel)/2;
+        oldvel = vel;
+      }else{
+        vel = 0;
+        oldvel = 0;
+      }
       /*
       Serial.print("pos: ");
       Serial.print(pos);   

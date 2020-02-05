@@ -91,7 +91,7 @@ bool pass = true;
 
 // CMD_B is the counter for outstanding commands
 uint8_t CMD_B = 0;
-const uint8_t CMD_MAX = 5;
+const uint8_t CMD_MAX = 10;
 
 // serial vars
 // globals for parsing Serial2 (grbl) command responses
@@ -155,12 +155,13 @@ Neotimer veltimer = Neotimer(20);
 
 
 // limit batch jogs by time
-Neotimer acceltimer = Neotimer(150);
+// lower makes less jerky
+Neotimer acceltimer = Neotimer(20);
 
 
 // timer for getting updates via "?"
 
-Neotimer updatetimer = Neotimer(100);
+Neotimer updatetimer = Neotimer(50);
 
 
 // timer for getting status
@@ -485,12 +486,12 @@ void accel_check_axis(Axis &axis){
     //  Map for 600ppr encoder
     //stepSize = map((long)axis.vel,0.0, 8000.0, 1, 150);
   
-    float tmpStepSize = (axis.vel * axis.vel) * 0.005;
-
-    if(tmpStepSize < 2){
+    float tmpStepSize = (axis.vel * axis.vel * axis.vel) * 0.00000001;
+  
+    if(tmpStepSize < 2.0){
       stepSize = tmpStepSize;
     }else{
-      stepSize = 2.0;
+      stepSize = 2;
     }
     
   
@@ -498,11 +499,11 @@ void accel_check_axis(Axis &axis){
 
     //stepSize = map((long)axis.vel,0.0, 400.0, 1, 150);
     if(stepSize > 0){
-      batchJog(axis);
       old_mstate = mstate;
       mstate = AccelModeRun;
       currentVel = axis.vel;
       axis.setRunning();
+      batchJog(axis);
       if(serial_dbg){
         Serial.print("StepSize: ");
         Serial.println(stepSize);
@@ -562,6 +563,7 @@ void halt(char * msg){
 
 // queue up the jog commands and cancel when you the MPG acceleration goes to 0
 void batchJog(Axis &axis){
+  //batchJog("$J=G91 ",axis);
   batchJog("$J=G91 ",axis);
 }
 
@@ -580,8 +582,8 @@ void batchJog(const char* start, Axis &axis){
 
 // jogs axis one stepSize
 void waitJog(Axis &axis){
-  //waitJog("$J=G91 ", axis);
-  waitJog("G1 ",axis);
+  waitJog("$J=G91 ", axis);
+  //waitJog("G1 ",axis);
 }
 
 void requestUpdate(){
@@ -604,26 +606,18 @@ void doJog(const char* start, Axis &axis){
   // G1 Y-79.70 F1000.00
 
   // G1 Y-79.7 F1000.0
-  float mpg_factor = 0.05;
+  float mpg_factor = 0.1;
 
   grbl_data_t *grbl_data = getData();
   Serial2.print(start);
   Serial2.print(axis.axis_name);
 
-  /*  favoring G91
-  float jog_pos = (grbl_data->position[axis.axis_num] + stepSize);
-  if(!axis.forward){
-    //Serial2.print("-");
-    jog_pos = (grbl_data->position[axis.axis_num] - stepSize) ;
-  }
-  */
 
   float jog_pos = stepSize;
   if(!axis.forward){
     Serial2.print("-");
   }
-  //Serial2.print((stepSize /100.0));
-  // grbl_data->position[Y_AXIS]
+
   Serial2.print(jog_pos);
   Serial2.print(" F");
   Serial2.println((feed * mpg_factor) * axis.vel);
@@ -634,9 +628,9 @@ void doJog(const char* start, Axis &axis){
     Serial.print(start);
     Serial.print(axis.axis_name);
     if(!axis.forward){
-      //Serial.print("-");
+      Serial.print("-");
     }
-    Serial.print((grbl_data->position[axis.axis_num] + stepSize));
+    Serial.print(jog_pos);
     Serial.print(" F");
     Serial.println((feed * mpg_factor) * axis.vel);
 
