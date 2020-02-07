@@ -54,7 +54,6 @@ mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
 #include "pos.h"
 #include <Bounce2.h>
 #include "myenums.h"
-//#include "./gbbb.h"
 #include <grbl_chat.h>
 #include <EwmaT.h>
 
@@ -83,18 +82,21 @@ bool gotAccelOk = false;
 uint8_t screen_tick = 0;
 
 const char* halt_msg;
+char jog_string[20];
+
+
+//float mpg_factor = 0.007;
+float mpg_factor = 0.051;
+
 
 // wait for buffer to clear
-bool okWait = false;
-bool jogWait = false;
+bool noOk = true;
+
 
 // flag for passive mode;
 bool pass = true;
 
 // buffer control
-
-// CMD_B is the counter for outstanding commands
-uint8_t CMD_B = 0;
 
 // this is the grbl buffer max, for grblHAL it is 35, grbl is smaller
 const uint8_t GBUFF_MAX = 35;
@@ -123,6 +125,7 @@ const int NUM_BUTTONS = 5;
 const uint8_t BUTTON_PINS[NUM_BUTTONS] = {btn1,btn2,btn3,btn4,btn5};
 Bounce * buttons = new Bounce[NUM_BUTTONS];
 
+// this sets the stepSize using a button to step through the options
 uint8_t stepCnt = 3;
 
 // inc_mode moves one stepSize.  inc_mode false activates acceleration mode.
@@ -141,11 +144,11 @@ Gstate _gs;
 
 PosSet oldPos = {Pos(),Pos(),false};
 
-Neotimer btntimer = Neotimer(35);
+Neotimer btntimer = Neotimer(50);
 
 // timer for updating screen
 
-Neotimer displaytimer = Neotimer(75);
+Neotimer displaytimer = Neotimer(150);
 
 // timer for waiting for grbl to go back to IDLE state after CMD_JOG_CANCEL
 
@@ -156,7 +159,7 @@ Neotimer canceltimer = Neotimer(1200);
 Neotimer incjogstarttimeout = Neotimer(50);
 
 // allow for regular timing of velocity
-Neotimer veltimer = Neotimer(2);
+Neotimer veltimer = Neotimer(6);
 
 
 // limit batch jogs by time
@@ -166,12 +169,10 @@ Neotimer acceltimer = Neotimer(10);
 
 // timer for getting updates via "?"
 
-Neotimer updatetimer = Neotimer(50);
+Neotimer updatetimer = Neotimer(100);
 
-
-// timer for getting status
-
-Neotimer lasttimer = Neotimer(50);
+// state check timer
+Neotimer statetimer = Neotimer(10);
 
 
 // display stuff
@@ -256,8 +257,6 @@ void func_timer_2(){
 
 HardwareTimer timer_3(3);
 
-volatile long ypos = 0;
-volatile long yold_pos = 2;
 Axis Yaxis("Y", Y_AXIS,timer_3);
 
 void func_timer_3(){
@@ -305,6 +304,7 @@ void readLine(){
         if(serial_dbg){
 
           Serial.write(rc);
+          //Serial.flush();
 
         }
         if (rc != endMarker) {
@@ -317,10 +317,6 @@ void readLine(){
         else {
             cmd[ndx] = '\0'; // terminate the string
             ndx = 0;
-  
-            checkOk();
-            //if(serial_dbg)
-              //Serial.write(cmd);
             parseData(cmd);
             if(mstate == Passive){
               Serial.print(cmd);
@@ -330,14 +326,6 @@ void readLine(){
     }
 }
 
-
-void checkOk(){
-  if(cmd[0] == 'o' && cmd[1] == 'k'){
-    if(mstate == AccelModeRun && CMD_B > 0){
-      CMD_B--;
-      }
-    }
-}
 
 void dbg(char* s){
   if(serial_dbg){
@@ -351,6 +339,7 @@ void dbgln(char* s){
 }
 
 
+/*  TODO: do I need this?
 void updateStepSize(){
   if(stepCnt <= 1){
     stepCnt = 1;
@@ -377,6 +366,7 @@ void updateStepSize(){
     }
   }
 }
+*/
 
 
 // checks the buffer
@@ -389,6 +379,30 @@ bool bufferFull(){
     // TODO:  debug to print out buffered commands
     //buffer_full = false;
     return true;
+  }
+}
+
+void sendCMD(char* s){
+  Serial2.println(s);
+  if(serial_dbg){
+    Serial.println(s);
+  }
+  waitForOk();
+}
+
+void waitForOk(){
+  _gs.d_status = "ok?";
+  noOk = true;
+  while(noOk){
+    readLine();
+    if(cmd[0] == 'o' && cmd[1] == 'k'){
+      noOk = false;
+    }else if(!strncmp(cmd,"error:", 6)){
+      old_mstate = mstate;
+      mstate = Halt;
+      doJogCancelAll();
+      noOk = false;
+    }
   }
 }
 
@@ -409,12 +423,16 @@ void reset_pos(){
 }
 
 void inc_check_axis(Axis &axis){
-  if(axis.moved() && mstate == IncModeWait )
+  if(axis.moved() && (mstate == IncModeWait || mstate == IncJogRun))
     {
+    stepSize = 0.05; 
+    axis.setRunning();
     waitJog(axis);
-    //old_mstate = mstate;
-    //mstate = IncJogStart;
+    old_mstate = mstate;
+    mstate = IncJogRun;
     //incjogstarttimeout.start();
+    axis.resetPos();
+  }else if(axis.moved()){
     axis.resetPos();
   }
 }
@@ -434,18 +452,28 @@ void calculate_velocity(){
   }
 }
 
-void doVelChecks(Axis &axis){
-  if(axis.vel < 10 && axis.running && mstate == AccelModeRun){
-    mstate = AccelModeCancel;
-    if(serial_dbg)
+void doJogCancelAll(){
+  doJogCancel();
+  Yaxis.notRunning();
+  Zaxis.notRunning();
+  Xaxis.notRunning();
+}
+
+void doJogCancel(){
+  if(serial_dbg)
       {
-      Serial.print(axis.vel);
+      //Serial.print(axis.vel);
       Serial.println(" JOG_CANCEL");
     }
-    Serial2.flush();
     Serial2.write(CMD_JOG_CANCEL);
     Serial2.flush();
-    CMD_B = 0;
+}
+
+void doVelChecks(Axis &axis){
+  if(axis.vel < 1 && axis.running && mstate == AccelModeRun){
+    old_mstate = mstate;
+    mstate = AccelModeCancel;
+    doJogCancel();
     _gs.d_status = "STOP!";
     axis.resetPos();
     axis.notRunning();
@@ -477,24 +505,16 @@ void accel_check_axis(Axis &axis){
       }
     }
     
-  
-    // Map for 24ppr encoder
-
-    //stepSize = map((long)axis.vel,0.0, 400.0, 1, 150);
-    if(stepSize > 0){
-      old_mstate = mstate;
-      mstate = AccelModeRun;
-      currentVel = axis.vel;
-      axis.setRunning();
-      batchJog(axis);
-      if(serial_dbg){
-        Serial.print("StepSize: ");
-        Serial.println(stepSize);
-      }  
-      //axis.resetPos();
-    }else{
-      axis.resetPos();
-    }
+    old_mstate = mstate;
+    mstate = AccelModeRun;
+    currentVel = axis.vel;
+    axis.setRunning();
+    batchJog(axis);
+    if(serial_dbg){
+      Serial.print("StepSize: ");
+      Serial.println(stepSize);
+    }  
+    axis.resetPos();
   }
   // ensure pos updated if we moved but the buffer was full or we were in the wrong mode
   else if(axis.moved()){
@@ -517,13 +537,12 @@ void checkBtns(){
   
   if(buttons[STEP_INC].rose()){
     stepCnt++;
-    updateStepSize();
+    //updateStepSize();
   }
 
 
   if(buttons[INC_TOGGLE].rose()){
     inc_mode = !inc_mode;
-    CMD_B = 0;
   }
 
   if(buttons[CLEAR_ALARM].rose()){
@@ -558,17 +577,16 @@ void batchJog(Axis &axis){
 void batchJog(const char* start, Axis &axis){
   if(!bufferFull()){
     doJog(start,axis);
-    CMD_B++;
   }else{
     if(serial_dbg){
-      Serial.println(CMD_B);
       Serial.println("Buffer full");
     }
   }
 }
   
 
-// jogs axis one stepSize
+// jogs axis one stepSize, keep going unless velocity is 0.
+// could wait for OK on each jog or just look at the buffer... not sure which is better
 void waitJog(Axis &axis){
   waitJog("$J=G91 ", axis);
   //waitJog("G1 ",axis);
@@ -579,27 +597,14 @@ void requestUpdate(){
 }
 
 void waitJog(const char* start, Axis &axis){
-  if(!bufferFull() && !jogWait){
+  if(!bufferFull()){
     doJog(start,axis);
-    //CMD_B++;
-    requestUpdate();
   }
 }
 
 
-
+//  this should execute the jog for any jog type and make available the jog command sent for debugging
 void doJog(const char* start, Axis &axis){
-
-  // this is no good
-  // G1 Y-79.70 F1000.00
-  // this works
-  // G1 Y-79.7 F1000.0
-  float mpg_factor = 0.007;
-
-  //grbl_data_t *grbl_data = getData();
-  Serial2.print(start);
-  Serial2.print(axis.axis_name);
-
 
   float jog_pos = stepSize;
 
@@ -607,33 +612,13 @@ void doJog(const char* start, Axis &axis){
   int tmpFeed = feedFilter.filter((feed * mpg_factor) * axis.vel);
   axis.feed = tmpFeed;
   if(!axis.forward){
-    Serial2.print("-");
+    jog_pos = jog_pos * -1;
   }
 
-  Serial2.print(jog_pos);
-  Serial2.print(" F");
-  Serial2.println(axis.feed);
 
-
-  // 
-  if(serial_dbg2){
-    Serial.print(start);
-    Serial.print(axis.axis_name);
-    if(!axis.forward){
-      Serial.print("-");
-    }
-    Serial.print(jog_pos);
-    Serial.print(" F");
-    Serial.println(axis.feed);
-
-
-    Serial.print(axis.getOldPos());
-    Serial.print(",");
-    Serial.print(axis.getPos());
-    Serial.print(",");
-    Serial.print(currentVel);
-    Serial.print(",");
-    Serial.println(stepSize);
+  if(jog_pos != 0 && axis.feed != 0){
+    sprintf(jog_string, "%s%s%.2fF%d",start,axis.axis_name,jog_pos,axis.feed);
+    sendCMD(jog_string);
   }
 }
 
@@ -690,18 +675,11 @@ void smartJog(Axis &axis){
 void drawCMD(std::string &c){
   display.setTextColor(WHITE, BLACK);
   display.setCursor(51,1);
-
-  //display.print(disp_tick);
-  //disp_tick = !disp_tick;
-
-  display.print("-");
-  display.print(CMD_B);
   display.print(c.c_str());
   display.print(" : ");
 
   grbl_data_t *grbl_data = getData();
   display.print(shortNames[grbl_data->grbl.state]);
-  display.setCursor(0,0);
 }
 
 int tick_line(){
@@ -714,9 +692,9 @@ int tick_line(){
 
 // draws _gs.d_cmd
 void drawStatus(std::string &c){
-  display.drawFastHLine(tick_line(), 50,30, WHITE);
+  display.drawFastHLine(tick_line(), 63,30, WHITE);
   display.setTextColor(WHITE, BLACK);
-  display.setCursor(0,42);
+  display.setCursor(0,80);
   display.print(c.c_str());
   //display.print();
 }
@@ -768,21 +746,6 @@ void drawStep(){
   display.setCursor(85,10);
   display.print("S:");
   display.print(stepSize);
-
-
-  /// Print waiting status and the buffer size right of the position
-  ///  < okWait > : < buffer size > 
-  display.setCursor(85,33);
-  display.print(okWait);
-  
-  display.print(":");
-  
-  display.print(CMD_B);
-  display.print(":");
-
-  display.print(jogWait);
-  
-  
 }
 void drawBuff(){
   grbl_data_t *grbl_data = getData();
@@ -794,16 +757,27 @@ void drawBuff(){
   display.print(grbl_data->buffer_rx);
 }
 
+void drawHalt(){
+  display.setTextColor(WHITE,BLACK);
+  display.setCursor(0,0);
+  display.print("HALT:");
+  display.print(cmd);
+}
+
 void drawDisplay(){
-  if(displaytimer.repeat()){
-    display.clearDisplay();
-    drawCMD(_gs.d_cmd);
-    //drawStatus(_gs.d_status);
-    drawBuff();
-    drawPOS();
-    drawMode();
-    drawStep();
-    display.display();
+  if(displaytimer.repeat() && mstate != Halt){
+    if(mstate == Halt){
+      drawHalt();
+    }else{
+      display.clearDisplay();
+      drawCMD(_gs.d_cmd);
+      drawStatus(_gs.d_status);
+      drawBuff();
+      drawPOS();
+      drawMode();
+      drawStep();
+      display.display();
+    }
   }
 }
 
@@ -908,13 +882,14 @@ void loop() {
   // get stuff from serial and assemble messages from grbl.
   readLine();
 
+  /*  TODO: what is this?  should only workin passive mode right?
   if (Serial.available()) {
     Serial2.write(Serial.read());
   }
+  */
   
   drawDisplay();
 
-  //if(updatetimer.repeat() && mstate != AccelModeRun){
   if(updatetimer.repeat() && mstate != Passive){
     requestUpdate(); 
   }
@@ -926,14 +901,17 @@ void loop() {
     checkBtns();
   }
   grbl_data_t *grbl_data = getData();
+  calculate_velocity();
 
-  switch(mstate){
+  if(statetimer.repeat()){
+
+    switch(mstate){
       case SetupDone:
         if(pass){
           mstate = Passive;
         }else{
-          mstate = IncModeWait;
-          //mstate = AccelModeWait;
+          //mstate = IncModeWait;
+          mstate = AccelModeWait;
         }  
         break;
       case Passive:
@@ -947,13 +925,13 @@ void loop() {
         if(pass){
           old_mstate = mstate;
           mstate = Passive;
-        }else{
-          // check encoders, if they move they will transition to IncJogStart
-          inc_check_encoders();
+          break;
         }
         if(!inc_mode){
           old_mstate = mstate;
           mstate =  AccelModeWait;
+        }else{
+          inc_check_encoders();
         }
         break;
        
@@ -990,10 +968,7 @@ void loop() {
         // Jog done, transition state
         if(grbl_data->grbl.state == Idle){
           old_mstate = mstate;
-          CMD_B = 0;
           mstate = AccelModeWait;
-          stepSize = defaultStepSize;
-
           // capture current position on encoders.  this is used to detect a move.
           reset_pos();
         }else{
@@ -1027,24 +1002,41 @@ void loop() {
         }else{
           _gs.d_status = "Waiting for Jog Start";
         }
+
+        // if we are not using ok and parsing grbl buffer do we need this?
+        /*
         if (incjogstarttimeout.done()){
           dbgln("IncJogStart timedout!");
           old_mstate = mstate;
           mstate = IncModeWait;
         }
+        */
         break;
       case IncJogRun:
+        if((Zaxis.running && Zaxis.vel < 1) || (Yaxis.running && Yaxis.vel < 1) || (Xaxis.running && Xaxis.vel < 1)){
+          doJogCancelAll();
+          old_mstate = mstate;
+          mstate = IncJogEnd;
+        }
         if(grbl_data->grbl.state == Idle){
           old_mstate = mstate;
           mstate = IncModeWait;
-          CMD_B--;
           // capture current position on encoders.  this is used to detect a move.
           reset_pos();
         }else{
+          inc_check_encoders();
           _gs.d_status = "Waiting for Jog Stop";
         }
         break;
       case IncJogEnd:
+        if(grbl_data->grbl.state == Idle){
+          old_mstate = mstate;
+          mstate = IncModeWait;
+        }else{
+          if(!bufferFull()){
+            Serial2.println("G4P0");
+          }
+        }
         break;
       case Halt:
         break;
@@ -1054,8 +1046,7 @@ void loop() {
         halt_msg = "Unknown state";
         halted = true;
         break;
-    }
-
+      }// end state case
     if(grbl_data->grbl.state != old_grbl_state){
       if (serial_dbg){
         Serial.print("New State: ");
@@ -1073,4 +1064,5 @@ void loop() {
       }
       last_mstate = mstate;
     }
+  }// end statetimer check
 }
