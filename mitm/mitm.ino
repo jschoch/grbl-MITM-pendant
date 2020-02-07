@@ -56,10 +56,14 @@ mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
 #include "myenums.h"
 //#include "./gbbb.h"
 #include <grbl_chat.h>
+#include <EwmaT.h>
+
+EwmaT <int> feedFilter(50, 50);
 
 // Vars
 
 
+//grbl_data_t grbl_data;
 
 uint8_t mstate = Setup;
 uint8_t old_mstate = Setup;
@@ -91,7 +95,10 @@ bool pass = true;
 
 // CMD_B is the counter for outstanding commands
 uint8_t CMD_B = 0;
-const uint8_t CMD_MAX = 10;
+
+// this is the grbl buffer max, for grblHAL it is 35, grbl is smaller
+const uint8_t GBUFF_MAX = 35;
+const uint8_t CMD_MAX = 20;
 
 // serial vars
 // globals for parsing Serial2 (grbl) command responses
@@ -142,13 +149,11 @@ Neotimer displaytimer = Neotimer(75);
 
 // timer for waiting for grbl to go back to IDLE state after CMD_JOG_CANCEL
 
-Neotimer canceltimer = Neotimer(200);
+Neotimer canceltimer = Neotimer(1200);
 
 // ensures we recover from missing a jog state transition
 
 Neotimer incjogstarttimeout = Neotimer(50);
-
-Neotimer mytimer = Neotimer(75);
 
 // allow for regular timing of velocity
 Neotimer veltimer = Neotimer(2);
@@ -156,7 +161,7 @@ Neotimer veltimer = Neotimer(2);
 
 // limit batch jogs by time
 // lower makes less jerky
-Neotimer acceltimer = Neotimer(20);
+Neotimer acceltimer = Neotimer(10);
 
 
 // timer for getting updates via "?"
@@ -376,10 +381,13 @@ void updateStepSize(){
 
 // checks the buffer
 bool bufferFull(){
-  if(CMD_B < CMD_MAX){
+  grbl_data_t *grbl_data = getData();
+  if((GBUFF_MAX - grbl_data->buffer) <= CMD_MAX){
+    //buffer_full = true;
     return false;
   }else{
     // TODO:  debug to print out buffered commands
+    //buffer_full = false;
     return true;
   }
 }
@@ -423,21 +431,6 @@ void calculate_velocity(){
     doVelChecks(Xaxis);
     doVelChecks(Yaxis);
     doVelChecks(Zaxis);
-    //long a = Xaxis.velocity();
-    //long b = Yaxis.velocity();
-    //long c = Zaxis.velocity();
-
-    /*
-    if(serial_dbg2){
-      Serial.print(a);
-      Serial.print(",");
-      Serial.print(b);
-      Serial.print(",");
-      Serial.print(c);
-      Serial.print(",");
-      Serial.println("Vel!"); 
-    }
-    */
   }
 }
 
@@ -467,18 +460,18 @@ void accel_check_axis(Axis &axis){
   doVelChecks(axis);
   if(axis.moved() && (mstate == AccelModeWait || mstate == AccelModeRun) && !bufferFull()  && acceltimer.repeat())
     {
-    //  Map for 600ppr encoder
-    //stepSize = map((long)axis.vel,0.0, 8000.0, 1, 150);
+
+    // create curve for step size
+    float tmpStepSize = (axis.vel * axis.vel * axis.vel) * 0.00000005;
   
-    // should start producing steps at 50 vel
-    float tmpStepSize = (axis.vel * axis.vel * axis.vel) * 0.00001;
-  
-    if(tmpStepSize < 0.01){
+    if(tmpStepSize < 0.000001){
       axis.resetPos();
       return;
     }else{
       if(tmpStepSize < 2.0 ){
         stepSize = tmpStepSize;
+      }else if(tmpStepSize < 0.01){
+        stepSize = 0.01;
       }else{
         stepSize = 2;
       }
@@ -503,6 +496,11 @@ void accel_check_axis(Axis &axis){
       axis.resetPos();
     }
   }
+  // ensure pos updated if we moved but the buffer was full or we were in the wrong mode
+  else if(axis.moved()){
+    axis.resetPos();
+  }
+  
 }
 
 void checkBtns(){
@@ -594,17 +592,20 @@ void doJog(const char* start, Axis &axis){
 
   // this is no good
   // G1 Y-79.70 F1000.00
-
+  // this works
   // G1 Y-79.7 F1000.0
-  float mpg_factor = 0.01;
+  float mpg_factor = 0.007;
 
-  grbl_data_t *grbl_data = getData();
+  //grbl_data_t *grbl_data = getData();
   Serial2.print(start);
   Serial2.print(axis.axis_name);
 
 
   float jog_pos = stepSize;
-  axis.feed = (feed * mpg_factor) * axis.vel;
+
+  // calculates the feed rate based on velocity
+  int tmpFeed = feedFilter.filter((feed * mpg_factor) * axis.vel);
+  axis.feed = tmpFeed;
   if(!axis.forward){
     Serial2.print("-");
   }
@@ -741,9 +742,9 @@ void drawPOS(){
   //display.println(oldPos.mpos.y);
   display.print(grbl_data->position[Y_AXIS]);
   display.print(" ");
-  display.println(Yaxis.velocity());
+  display.print(Yaxis.velocity());
   display.print(" ");
-  display.print(Yaxis.feed);  
+  display.println(Yaxis.feed);  
 
   // z:
   display.print("Z: ");
@@ -764,7 +765,7 @@ void drawStep(){
 
   // prints the jog step size on the right
   display.setTextColor(WHITE,BLACK);
-  display.setCursor(85,25);
+  display.setCursor(85,10);
   display.print("S:");
   display.print(stepSize);
 
@@ -783,12 +784,22 @@ void drawStep(){
   
   
 }
+void drawBuff(){
+  grbl_data_t *grbl_data = getData();
+  display.setTextColor(WHITE,BLACK);
+  display.setCursor(0,54);
+  display.print("BB:");
+  display.print(grbl_data->buffer);
+  display.print(" RX: ");
+  display.print(grbl_data->buffer_rx);
+}
 
 void drawDisplay(){
   if(displaytimer.repeat()){
     display.clearDisplay();
     drawCMD(_gs.d_cmd);
-    drawStatus(_gs.d_status);
+    //drawStatus(_gs.d_status);
+    drawBuff();
     drawPOS();
     drawMode();
     drawStep();
@@ -986,6 +997,7 @@ void loop() {
           // capture current position on encoders.  this is used to detect a move.
           reset_pos();
         }else{
+          // check to see if a running axis's encoder reversed direction
           _gs.d_status = "Waiting for Jog Stop";
         }
         break;
