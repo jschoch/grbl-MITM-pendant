@@ -15,12 +15,14 @@ class Axis {
     volatile bool forward;
     long vel_new_pos;
     long vel_old_pos;
+    //volatile long vel;
     long vel;
+    volatile unsigned long rate;
     long oldvel;
     long current_vel;
     bool running;
-    unsigned long newtime;
-    unsigned long oldtime;
+    volatile unsigned long newtime;
+    volatile unsigned long oldtime;
     int feed;
     float step;
     float factor;
@@ -39,6 +41,7 @@ class Axis {
         old_pos=1L;
         oldvel = 0;
         pos=1L;
+        rate = 0;
         running = false;
         forward = true;
         oldtime = millis();
@@ -86,19 +89,12 @@ class Axis {
     void notRunning(){
       running = false;
     }
-    long velocity(){
-      newtime = millis();
-      //current_vel = abs(pos - vel_old_pos) * 1000 / (newtime - oldtime);
-      current_vel = adcFilter.filter(abs(pos - vel_old_pos) * 500 / (newtime - oldtime)); 
-      if(current_vel > 1){
-        vel = current_vel;
-      }else{
-        vel = 0;
-        //oldvel = 0;
-      }
+    void velocity(){
+      newtime = micros();
+      //newtime = millis();
+      //vel = (1/(newtime - oldtime)) * 100000 ;
+      rate = newtime - oldtime;
       oldtime = newtime;
-      vel_old_pos = pos;
-      return vel;
     }
 
 };

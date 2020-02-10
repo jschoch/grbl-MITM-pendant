@@ -58,6 +58,7 @@ mode 6 "yo yo" step mode.  Back and forth on one axis and stepover on the other.
 #include <EwmaT.h>
 
 EwmaT <int> feedFilter(50, 50);
+EwmaT <int> stepFilter(10,100);
 
 // Vars
 
@@ -86,7 +87,7 @@ char jog_string[20];
 
 
 //float mpg_factor = 0.007;
-float mpg_factor = 0.051;
+float mpg_factor = 0.01;
 
 
 // wait for buffer to clear
@@ -159,7 +160,7 @@ Neotimer canceltimer = Neotimer(1200);
 //Neotimer incjogstarttimeout = Neotimer(50);
 
 // allow for regular timing of velocity
-Neotimer veltimer = Neotimer(6);
+//Neotimer veltimer = Neotimer(6);
 
 
 // limit batch jogs by time
@@ -169,10 +170,10 @@ Neotimer acceltimer = Neotimer(10);
 
 // timer for getting updates via "?"
 
-Neotimer updatetimer = Neotimer(100);
+Neotimer updatetimer = Neotimer(50);
 
 // state check timer
-Neotimer statetimer = Neotimer(50);
+Neotimer statetimer = Neotimer(100);
 
 
 // display stuff
@@ -266,6 +267,7 @@ void func_timer_3(){
       Yaxis.forward = false;
       Yaxis.incrPos();
   }    
+  Yaxis.velocity();
 }
 
 // uses internal timer 4 on PB6 and PB7
@@ -426,13 +428,19 @@ void inc_check_axis(Axis &axis){
     {
     int distance = abs( axis.old_pos - axis.pos );
     Serial.print("D: ");
-    Serial.println(distance);
-    stepSize = 0.02 * distance; 
+    Serial.print(distance);
+    Serial.print(" ");
+    Serial.print(axis.rate);
+    //axis.vel = (1/axis.rate) * 100000; 
+    axis.vel = ((float)1/(float)axis.rate) * 100000UL;
+    Serial.print(" - ");
+    Serial.println(axis.vel);
+    //Serial.println(vel);
+    stepSize = 0.02 * distance;
     axis.setRunning();
     waitJog(axis);
     old_mstate = mstate;
     mstate = IncJogRun;
-    //incjogstarttimeout.start();
     axis.resetPos();
   }else if(axis.moved()){
     axis.resetPos();
@@ -447,11 +455,11 @@ void accel_check_encoders(){
 }
 
 void calculate_velocity(){
-  if(veltimer.repeat()){
+  //if(veltimer.repeat()){
     doVelChecks(Xaxis);
     doVelChecks(Yaxis);
     doVelChecks(Zaxis);
-  }
+  //}
 }
 
 void doJogCancelAll(){
@@ -721,7 +729,7 @@ void drawPOS(){
   //display.println(oldPos.mpos.y);
   display.print(grbl_data->position[Y_AXIS]);
   display.print(" ");
-  display.print(Yaxis.velocity());
+  display.print(Yaxis.vel);
   display.print(" ");
   display.println(Yaxis.feed);  
 
@@ -1014,7 +1022,7 @@ void loop() {
         */
         break;
       case IncJogRun:
-        if((Zaxis.running && Zaxis.vel < 1) || (Yaxis.running && Yaxis.vel < 1) || (Xaxis.running && Xaxis.vel < 1)){
+        if((Zaxis.running && Zaxis.vel < 10) || (Yaxis.running && Yaxis.vel < 10) || (Xaxis.running && Xaxis.vel < 10)){
           doJogCancelAll();
           old_mstate = mstate;
           mstate = IncJogEnd;
@@ -1023,7 +1031,7 @@ void loop() {
           old_mstate = mstate;
           mstate = IncModeWait;
           // capture current position on encoders.  this is used to detect a move.
-          reset_pos();
+          //reset_pos();
         }else{
           inc_check_encoders();
           _gs.d_status = "Waiting for Jog Stop";
