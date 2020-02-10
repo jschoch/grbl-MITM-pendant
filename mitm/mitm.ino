@@ -144,7 +144,7 @@ Gstate _gs;
 
 PosSet oldPos = {Pos(),Pos(),false};
 
-Neotimer btntimer = Neotimer(50);
+Neotimer btntimer = Neotimer(100);
 
 // timer for updating screen
 
@@ -156,7 +156,7 @@ Neotimer canceltimer = Neotimer(1200);
 
 // ensures we recover from missing a jog state transition
 
-Neotimer incjogstarttimeout = Neotimer(50);
+//Neotimer incjogstarttimeout = Neotimer(50);
 
 // allow for regular timing of velocity
 Neotimer veltimer = Neotimer(6);
@@ -172,7 +172,7 @@ Neotimer acceltimer = Neotimer(10);
 Neotimer updatetimer = Neotimer(100);
 
 // state check timer
-Neotimer statetimer = Neotimer(10);
+Neotimer statetimer = Neotimer(50);
 
 
 // display stuff
@@ -206,7 +206,6 @@ int rapidXY = 2000;
 // store hundreths of a mm, this is converted back to mm in doJog
 float defaultStepSize = 0.2;
 float stepSize = 0.2;
-int currentVel = 0;
 
 //  STM32 encoder stuff
 
@@ -219,7 +218,7 @@ int currentVel = 0;
 //
 
 
-int PPR = 4;
+int PPR = 1;
 
 HardwareTimer timer_1(1);
 
@@ -425,7 +424,10 @@ void reset_pos(){
 void inc_check_axis(Axis &axis){
   if(axis.moved() && (mstate == IncModeWait || mstate == IncJogRun))
     {
-    stepSize = 0.05; 
+    int distance = abs( axis.old_pos - axis.pos );
+    Serial.print("D: ");
+    Serial.println(distance);
+    stepSize = 0.02 * distance; 
     axis.setRunning();
     waitJog(axis);
     old_mstate = mstate;
@@ -507,7 +509,6 @@ void accel_check_axis(Axis &axis){
     
     old_mstate = mstate;
     mstate = AccelModeRun;
-    currentVel = axis.vel;
     axis.setRunning();
     batchJog(axis);
     if(serial_dbg){
